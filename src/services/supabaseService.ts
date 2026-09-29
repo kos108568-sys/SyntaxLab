@@ -60,9 +60,9 @@ export async function loadCourseFromSupabase(courseId = 'csharp-foundations'): P
               difficulty: t.difficulty,
               xp: t.xp,
               instructions: t.instructions,
-              theorySnippet: t.theory_snippet,
-              initialCode: t.initial_code,
-              solutionCode: t.solution_code,
+              theorySnippet: t.theory_snippet ? t.theory_snippet.replace(/\\n/g, '\n') : '',
+              initialCode: t.initial_code ? t.initial_code.replace(/\\n/g, '\n').replace(/\\t/g, '    ') : '',
+              solutionCode: t.solution_code ? t.solution_code.replace(/\\n/g, '\n').replace(/\\t/g, '    ') : '',
               tests: t.tests,
               quizOptions: t.quiz_options,
               hints: t.hints

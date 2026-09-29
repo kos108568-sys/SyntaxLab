@@ -25,6 +25,14 @@ interface TaskPlayerModalProps {
   onNextTask?: () => void;
 }
 
+const normalizeCode = (raw?: string) => {
+  if (!raw) return '';
+  return raw
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '')
+    .replace(/\\t/g, '    ');
+};
+
 export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   task,
   lesson,
@@ -43,8 +51,7 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   const isAlreadyCompleted = completedTaskIds.includes(task.id);
   const currentStudentData = currentUser ? studentsInClass.find(s => s.id === currentUser.id) : null;
 
-
-  const [code, setCode] = useState(task.initialCode || '');
+  const [code, setCode] = useState(() => normalizeCode(task.initialCode));
   const [selectedQuizOptionId, setSelectedQuizOptionId] = useState<string | null>(null);
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
@@ -54,6 +61,21 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   const [isAskingHelp, setIsAskingHelp] = useState(false);
   const [helpQuestionText, setHelpQuestionText] = useState('');
   const [helpSent, setHelpSent] = useState(false);
+
+  // Tab key indent handler
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const target = e.currentTarget;
+      const start = target.selectionStart;
+      const end = target.selectionEnd;
+      const newCode = code.substring(0, start) + '    ' + code.substring(end);
+      setCode(newCode);
+      setTimeout(() => {
+        target.selectionStart = target.selectionEnd = start + 4;
+      }, 0);
+    }
+  };
 
   // Run Code logic
   const handleRunCode = () => {
@@ -98,7 +120,7 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   };
 
   const handleResetCode = () => {
-    setCode(task.initialCode || '');
+    setCode(normalizeCode(task.initialCode));
     setRunResult(null);
   };
 
@@ -188,8 +210,8 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
                   Краткая справка по C#
                 </h3>
-                <pre className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-[11px] text-indigo-300 overflow-x-auto">
-                  {task.theorySnippet}
+                <pre className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-[11px] text-indigo-300 overflow-x-auto whitespace-pre">
+                  {normalizeCode(task.theorySnippet)}
                 </pre>
               </div>
             )}
@@ -280,14 +302,20 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
             {/* Task Type: Code Challenge or Bug Hunt */}
             {task.type !== 'quiz' ? (
               <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Code Textarea */}
-                <div className="flex-1 p-3 overflow-y-auto font-mono text-xs sm:text-sm">
+                {/* Code Textarea with Line Numbers */}
+                <div className="flex-1 p-3 overflow-y-auto font-mono text-xs sm:text-sm flex gap-3 bg-slate-950">
+                  <div className="select-none text-right text-slate-600 font-mono text-xs pt-0.5 leading-relaxed shrink-0 pr-2 border-r border-slate-800/80">
+                    {code.split('\n').map((_, i) => (
+                      <div key={i}>{i + 1}</div>
+                    ))}
+                  </div>
                   <textarea
                     rows={12}
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
+                    onKeyDown={handleKeyDown}
                     spellCheck={false}
-                    className="w-full h-full min-h-[220px] bg-transparent text-slate-100 font-mono resize-none focus:outline-none leading-relaxed selection:bg-indigo-600/30"
+                    className="flex-1 w-full h-full min-h-[220px] bg-transparent text-slate-100 font-mono resize-none focus:outline-none leading-relaxed selection:bg-indigo-600/30 whitespace-pre"
                   />
                 </div>
 
