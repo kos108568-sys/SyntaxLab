@@ -1,5 +1,10 @@
 export type UserRole = 'teacher' | 'student';
 
+export interface AcademicGroup {
+  id: string;
+  name: string;
+}
+
 export interface UserProfile {
   id: string;
   fullName: string;
@@ -7,6 +12,7 @@ export interface UserProfile {
   role: UserRole;
   groupName?: string;
   avatarUrl?: string;
+  isApproved?: boolean;
   currentStreakDays: number;
   totalXp: number;
   isOnline?: boolean;

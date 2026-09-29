@@ -34,6 +34,7 @@ export interface ClassroomStudentState {
 interface AppContextType {
   session: Session | null;
   currentUser: UserProfile | null;
+  setCurrentUser: React.Dispatch<React.SetStateAction<UserProfile | null>>;
   role: UserRole;
   setRole: (role: UserRole) => void;
   course: Course | null;
@@ -93,7 +94,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const githubLogin = (githubMetadata.user_name || githubMetadata.preferred_username || '').toLowerCase();
       const isTeacher = TEACHER_GITHUB_LOGINS.includes(githubLogin);
       
-      const fullName = githubMetadata.full_name || githubMetadata.user_name || user.email?.split('@')[0] || 'Разработчик';
+      const fullName = githubMetadata.full_name || githubMetadata.user_name || user.email?.split('@')[0] || 'Студент';
       const avatarUrl = githubMetadata.avatar_url;
       const resolvedRole: UserRole = isTeacher ? 'teacher' : ((data?.role as UserRole) || 'student');
 
@@ -105,7 +106,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           fullName,
           avatarUrl,
           role: resolvedRole,
-          groupName: isTeacher ? 'Преподавательский состав' : 'ИТ-301',
+          groupName: isTeacher ? 'Преподавательский состав' : '',
+          isApproved: isTeacher ? true : false,
           currentStreakDays: 1,
           totalXp: isTeacher ? 1000 : 0,
           isOnline: true
@@ -117,7 +119,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           full_name: fullName,
           avatar_url: avatarUrl,
           role: resolvedRole,
-          groupName: isTeacher ? 'Преподавательский состав' : 'ИТ-301'
+          group_name: isTeacher ? 'Преподавательский состав' : null,
+          is_approved: isTeacher ? true : false
         });
 
         setCurrentUser(newProfile);
@@ -125,7 +128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else {
         // Если пользователь преподаватель, но в БД еще значился студентом — обновляем в БД
         if (isTeacher && data.role !== 'teacher') {
-          await supabase.from('profiles').update({ role: 'teacher' }).eq('id', user.id);
+          await supabase.from('profiles').update({ role: 'teacher', is_approved: true }).eq('id', user.id);
         }
 
         const existingProfile: UserProfile = {
@@ -134,7 +137,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           fullName: data.full_name || fullName,
           avatarUrl: data.avatar_url || avatarUrl,
           role: resolvedRole,
-          groupName: data.group_name || (isTeacher ? 'Преподавательский состав' : 'ИТ-301'),
+          groupName: data.group_name || (isTeacher ? 'Преподавательский состав' : ''),
+          isApproved: isTeacher ? true : (data.is_approved ?? false),
           currentStreakDays: data.streak_days || 1,
           totalXp: data.total_xp || 0,
           isOnline: true
@@ -160,12 +164,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const dbSessions = await loadClassroomSessionsFromDb('ИТ-301');
       setStudentsInClass(dbSessions);
 
+      // Проверяем актуальный статус профиля (например, подтверждение учителем или смену имени)
+      const { data: { session: activeSession } } = await supabase.auth.getSession();
+      const activeUserId = activeSession?.user?.id;
+      if (activeUserId) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', activeUserId)
+          .maybeSingle();
+
+        if (prof) {
+          const githubLogin = (activeSession?.user?.user_metadata?.user_name || activeSession?.user?.user_metadata?.preferred_username || '').toLowerCase();
+          const isTeacher = TEACHER_GITHUB_LOGINS.includes(githubLogin);
+          setCurrentUser(prev => ({
+            id: prof.id,
+            email: prof.email || prev?.email || '',
+            fullName: prof.full_name || prev?.fullName || '',
+            avatarUrl: prof.avatar_url || prev?.avatarUrl,
+            role: isTeacher ? 'teacher' : ((prof.role as UserRole) || 'student'),
+            groupName: prof.group_name || (isTeacher ? 'Преподавательский состав' : ''),
+            isApproved: isTeacher ? true : (prof.is_approved ?? false),
+            currentStreakDays: prof.streak_days || 1,
+            totalXp: prof.total_xp || 0,
+            isOnline: true
+          }));
+        }
+      }
+
       // Загрузка решенных задач для текущего пользователя
-      if (currentUser?.id) {
+      if (activeUserId) {
         const { data: progressData } = await supabase
           .from('student_progress')
           .select('task_id')
-          .eq('user_id', currentUser.id)
+          .eq('user_id', activeUserId)
           .eq('status', 'completed');
 
         if (progressData) {
@@ -289,6 +321,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         session,
         currentUser,
+        setCurrentUser,
         role,
         setRole,
         course,

@@ -260,3 +260,113 @@ export function subscribeToClassroomRealtime(
     supabase.removeChannel(channel);
   };
 }
+
+// 7. Загрузка академических групп
+export async function loadAcademicGroups(): Promise<string[]> {
+  if (!isSupabaseConfigured) return ['ИТ-301', 'ИТ-302', 'ПИ-201'];
+
+  try {
+    const { data, error } = await supabase
+      .from('academic_groups')
+      .select('name')
+      .order('name');
+
+    if (error || !data || data.length === 0) {
+      return ['ИТ-301', 'ИТ-302', 'ПИ-201'];
+    }
+
+    return data.map(g => g.name);
+  } catch {
+    return ['ИТ-301', 'ИТ-302', 'ПИ-201'];
+  }
+}
+
+// 8. Добавление новой учебной группы преподавателем
+export async function createAcademicGroup(name: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase.from('academic_groups').insert({ name: name.trim() });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+// 9. Удаление учебной группы
+export async function deleteAcademicGroup(name: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase.from('academic_groups').delete().eq('name', name);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+// 10. Загрузка списка всех студентов (для подтверждения и модерации преподавателем)
+export async function loadAllStudentsForTeacher() {
+  if (!isSupabaseConfigured) return [];
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('role', 'student')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error('Error loading students for moderation:', err);
+    return [];
+  }
+}
+
+// 11. Подтверждение студента и изменение ФИО / группы преподавателем
+export async function updateAndApproveStudentProfile(
+  userId: string,
+  fullName: string,
+  groupName: string,
+  isApproved = true
+): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        full_name: fullName.trim(),
+        group_name: groupName.trim(),
+        is_approved: isApproved
+      })
+      .eq('id', userId);
+
+    return !error;
+  } catch (err) {
+    console.error('Error updating student profile:', err);
+    return false;
+  }
+}
+
+// 12. Отправка студентом заявки с выбором группы и ФИО при первом входе
+export async function submitStudentOnboarding(
+  userId: string,
+  fullName: string,
+  groupName: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        full_name: fullName.trim(),
+        group_name: groupName.trim(),
+        is_approved: false
+      })
+      .eq('id', userId);
+
+    return !error;
+  } catch (err) {
+    console.error('Error submitting student onboarding:', err);
+    return false;
+  }
+}
+

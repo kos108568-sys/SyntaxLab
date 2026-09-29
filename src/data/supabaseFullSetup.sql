@@ -11,10 +11,25 @@ create table if not exists public.profiles (
   role text not null default 'student' check (role in ('teacher', 'student')),
   group_name text default 'ИТ-301',
   avatar_url text,
+  is_approved boolean default false,
   total_xp integer default 0,
   streak_days integer default 0,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Добавляем колонку, если таблица уже существовала
+alter table public.profiles add column if not exists is_approved boolean default false;
+update public.profiles set is_approved = true where role = 'teacher';
+
+-- 1.1 ТАБЛИЦА АКАДЕМИЧЕСКИХ ГРУПП (Создаются преподавателем)
+create table if not exists public.academic_groups (
+  id uuid default gen_random_uuid() primary key,
+  name text not null unique,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+insert into public.academic_groups (name) values ('ИТ-301'), ('ИТ-302'), ('ПИ-201') on conflict (name) do nothing;
+
 
 -- 2. ТАБЛИЦА КУРСОВ
 create table if not exists public.courses (
@@ -142,8 +157,24 @@ alter table public.classroom_announcements enable row level security;
 drop policy if exists "Profiles visible to all users" on public.profiles;
 create policy "Profiles visible to all users" on public.profiles for select using (true);
 
+drop policy if exists "Profiles insertable" on public.profiles;
+create policy "Profiles insertable" on public.profiles for insert with check (true);
+
 drop policy if exists "Users update own profile" on public.profiles;
 create policy "Users update own profile" on public.profiles for update using (auth.uid() = id);
+
+drop policy if exists "Teachers can update student profiles" on public.profiles;
+create policy "Teachers can update student profiles" on public.profiles for update using (
+  exists (select 1 from public.profiles where id = auth.uid() and role = 'teacher')
+);
+
+-- Группы
+alter table public.academic_groups enable row level security;
+drop policy if exists "Groups readable by all" on public.academic_groups;
+create policy "Groups readable by all" on public.academic_groups for select using (true);
+
+drop policy if exists "Groups editable by teachers" on public.academic_groups;
+create policy "Groups editable by teachers" on public.academic_groups for all using (true);
 
 drop policy if exists "Courses are readable by everyone" on public.courses;
 create policy "Courses are readable by everyone" on public.courses for select using (true);

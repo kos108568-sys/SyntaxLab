@@ -1,7 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import type { ClassroomStudentState } from '../../context/AppContext';
 import type { Task, TaskType } from '../../types';
+import {
+  loadAcademicGroups,
+  createAcademicGroup,
+  deleteAcademicGroup,
+  loadAllStudentsForTeacher,
+  updateAndApproveStudentProfile
+} from '../../services/supabaseService';
 import {
   Users,
   Radio,
@@ -18,7 +25,12 @@ import {
   Check,
   BookOpen,
   MessageSquare,
-  Bell
+  Bell,
+  UserCheck,
+  Edit2,
+  Trash2,
+  FolderPlus,
+  GraduationCap
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -33,11 +45,37 @@ export const AdminDashboard: React.FC = () => {
     isSupabaseConnected
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'radar' | 'curriculum' | 'gradebook' | 'database'>('radar');
+  const [activeTab, setActiveTab] = useState<'radar' | 'students' | 'curriculum' | 'gradebook' | 'database'>('radar');
   const [selectedStudentForHelp, setSelectedStudentForHelp] = useState<ClassroomStudentState | null>(null);
   const [helpCommentInput, setHelpCommentInput] = useState('');
   const [newAnnouncement, setNewAnnouncement] = useState('');
   const [sqlCopied, setSqlCopied] = useState(false);
+
+  // Groups and Students Moderation state
+  const [academicGroups, setAcademicGroups] = useState<string[]>(['ИТ-301', 'ИТ-302', 'ПИ-201']);
+  const [newGroupInput, setNewGroupInput] = useState('');
+  const [allStudents, setAllStudents] = useState<any[]>([]);
+  const [filterGroup, setFilterGroup] = useState<string>('all');
+  const [isProcessingStudent, setIsProcessingStudent] = useState(false);
+
+  // Edit student modal state
+  const [editingStudent, setEditingStudent] = useState<any | null>(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editGroupName, setEditGroupName] = useState('');
+
+  // Load groups and students
+  const refreshStudentsAndGroups = async () => {
+    const [groupsData, studentsData] = await Promise.all([
+      loadAcademicGroups(),
+      loadAllStudentsForTeacher()
+    ]);
+    if (groupsData.length > 0) setAcademicGroups(groupsData);
+    setAllStudents(studentsData);
+  };
+
+  useEffect(() => {
+    refreshStudentsAndGroups();
+  }, [activeTab]);
 
   // New task modal
   const [isAddingTask, setIsAddingTask] = useState(false);
@@ -49,6 +87,7 @@ export const AdminDashboard: React.FC = () => {
   const [newTaskXp, setNewTaskXp] = useState(30);
 
   const stuckStudents = studentsInClass.filter(s => s.status === 'stuck' || s.needsHelp);
+  const pendingStudents = allStudents.filter(s => !s.is_approved);
 
   const handleSendHint = (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +102,58 @@ export const AdminDashboard: React.FC = () => {
     if (!newAnnouncement.trim()) return;
     setBroadcastMessage(newAnnouncement.trim());
     setNewAnnouncement('');
+  };
+
+  const handleApproveStudent = async (studentId: string, fullName: string, groupName: string) => {
+    setIsProcessingStudent(true);
+    await updateAndApproveStudentProfile(studentId, fullName, groupName, true);
+    await refreshStudentsAndGroups();
+    setIsProcessingStudent(false);
+  };
+
+  const handleRejectStudent = async (studentId: string) => {
+    if (confirm('Отклонить заявку студента? Ему потребуется отправить заявку заново.')) {
+      setIsProcessingStudent(true);
+      await updateAndApproveStudentProfile(studentId, 'Не подтвержден', '', false);
+      await refreshStudentsAndGroups();
+      setIsProcessingStudent(false);
+    }
+  };
+
+  const handleAddGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGroupInput.trim()) return;
+    await createAcademicGroup(newGroupInput.trim());
+    setNewGroupInput('');
+    await refreshStudentsAndGroups();
+  };
+
+  const handleDeleteGroup = async (groupName: string) => {
+    if (confirm(`Вы уверены, что хотите удалить группу "${groupName}"?`)) {
+      await deleteAcademicGroup(groupName);
+      await refreshStudentsAndGroups();
+    }
+  };
+
+  const handleOpenEditStudent = (student: any) => {
+    setEditingStudent(student);
+    setEditFullName(student.full_name || '');
+    setEditGroupName(student.group_name || academicGroups[0] || 'ИТ-301');
+  };
+
+  const handleSaveStudentEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent || !editFullName.trim()) return;
+    setIsProcessingStudent(true);
+    await updateAndApproveStudentProfile(
+      editingStudent.id,
+      editFullName.trim(),
+      editGroupName,
+      editingStudent.is_approved
+    );
+    setEditingStudent(null);
+    await refreshStudentsAndGroups();
+    setIsProcessingStudent(false);
   };
 
   const handleCreateTask = (e: React.FormEvent) => {
@@ -145,6 +236,24 @@ alter publication supabase_realtime add table public.classroom_sessions;`;
               {stuckStudents.length > 0 && (
                 <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500 text-slate-950 font-bold">
                   {stuckStudents.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('students')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'students'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <UserCheck className="w-4 h-4" />
+              <span>Студенты и Группы</span>
+              {pendingStudents.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold animate-pulse">
+                  {pendingStudents.length}
                 </span>
               )}
             </button>
@@ -440,6 +549,308 @@ alter publication supabase_realtime add table public.classroom_sessions;`;
           </div>
         </div>
 
+        </div>
+      )}
+
+      {/* TAB: STUDENTS & GROUPS MODERATION */}
+      {activeTab === 'students' && (
+        <div className="space-y-6">
+          
+          {/* SECTION 1: PENDING STUDENT APPROVALS */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                    <span>Заявки студентов на подтверждение</span>
+                    {pendingStudents.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-amber-500 text-slate-950 font-bold animate-pulse">
+                        {pendingStudents.length} новых
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Студенты, которые вошли через GitHub и выбрали группу, но еще не допущены к занятиям.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {pendingStudents.length === 0 ? (
+              <div className="py-8 text-center space-y-2 bg-slate-950/40 rounded-xl border border-slate-800/80">
+                <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400 opacity-80" />
+                <p className="text-sm font-semibold text-slate-200">Все заявки обработаны</p>
+                <p className="text-xs text-slate-400">Новые студенты появятся здесь сразу после входа через GitHub.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {pendingStudents.map((student) => (
+                  <div
+                    key={student.id}
+                    className="bg-slate-950/80 border border-amber-500/30 rounded-2xl p-4 shadow-lg shadow-amber-500/5 space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={student.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
+                          alt=""
+                          className="w-10 h-10 rounded-full ring-2 ring-amber-500/30 object-cover"
+                        />
+                        <div>
+                          <h3 className="text-sm font-bold text-white">{student.full_name}</h3>
+                          <p className="text-[11px] text-slate-400 font-mono">{student.email}</p>
+                        </div>
+                      </div>
+
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                        {student.group_name || 'Не указана'}
+                      </span>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditStudent(student)}
+                        className="flex items-center gap-1 text-xs text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>Изменить ФИО / группу</span>
+                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isProcessingStudent}
+                          onClick={() => handleRejectStudent(student.id)}
+                          className="px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 rounded-xl transition-colors font-medium"
+                        >
+                          Отклонить
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isProcessingStudent}
+                          onClick={() => handleApproveStudent(student.id, student.full_name, student.group_name)}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-emerald-600/25 flex items-center gap-1.5 transition-all"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Подтвердить</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 2: ACADEMIC GROUPS MANAGEMENT */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                  <FolderPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white tracking-tight">Учебные группы</h2>
+                  <p className="text-xs text-slate-400">
+                    Список групп, доступных студентам для выбора при первом входе.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Add new group form */}
+            <form onSubmit={handleAddGroup} className="flex items-center gap-3">
+              <input
+                type="text"
+                value={newGroupInput}
+                onChange={(e) => setNewGroupInput(e.target.value)}
+                placeholder="Например: ПИ-202 или ИТ-303"
+                className="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-64"
+              />
+              <button
+                type="submit"
+                disabled={!newGroupInput.trim()}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Добавить группу</span>
+              </button>
+            </form>
+
+            {/* Existing groups list */}
+            <div className="flex flex-wrap gap-2.5 pt-2">
+              {academicGroups.map((group) => {
+                const countInGroup = allStudents.filter(s => s.group_name === group && s.is_approved).length;
+
+                return (
+                  <div
+                    key={group}
+                    className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3.5 py-2 rounded-xl text-xs"
+                  >
+                    <GraduationCap className="w-4 h-4 text-indigo-400" />
+                    <span className="font-bold text-white font-mono">{group}</span>
+                    <span className="text-slate-500 text-[11px]">({countInGroup} студ.)</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteGroup(group)}
+                      title="Удалить группу"
+                      className="text-slate-500 hover:text-red-400 transition-colors ml-1 p-0.5 rounded"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* SECTION 3: ALL APPROVED STUDENTS REGISTRY */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h2 className="text-base font-bold text-white tracking-tight">Подтвержденные студенты</h2>
+                <p className="text-xs text-slate-400">
+                  Реестр всех студентов с доступом к материалам курса C#. Вы можете изменить ФИО или группу в любой момент.
+                </p>
+              </div>
+
+              {/* Group Filter */}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-400">Фильтр:</span>
+                <select
+                  value={filterGroup}
+                  onChange={(e) => setFilterGroup(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+                >
+                  <option value="all">Все группы ({allStudents.filter(s => s.is_approved).length})</option>
+                  {academicGroups.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                  <tr>
+                    <th className="px-4 py-3">Студент (ФИО)</th>
+                    <th className="px-4 py-3">Группа</th>
+                    <th className="px-4 py-3">GitHub Email</th>
+                    <th className="px-4 py-3">Опыт (XP)</th>
+                    <th className="px-4 py-3 text-right">Действие</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 bg-slate-900/40">
+                  {allStudents
+                    .filter(s => s.is_approved && (filterGroup === 'all' || s.group_name === filterGroup))
+                    .map((student) => (
+                      <tr key={student.id} className="hover:bg-slate-950/40 transition-colors">
+                        <td className="px-4 py-3 font-semibold text-white flex items-center gap-2.5">
+                          <img
+                            src={student.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
+                            alt=""
+                            className="w-7 h-7 rounded-full object-cover"
+                          />
+                          <span>{student.full_name}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="px-2 py-0.5 bg-slate-800 text-indigo-400 rounded font-mono font-medium">
+                            {student.group_name || '—'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-slate-400">{student.email}</td>
+                        <td className="px-4 py-3 font-bold text-amber-400 font-mono">{student.total_xp || 0} XP</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditStudent(student)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors"
+                          >
+                            <Edit2 className="w-3 h-3 text-indigo-400" />
+                            <span>Редактировать</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* MODAL: EDIT STUDENT FULL NAME AND GROUP */}
+      {editingStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-indigo-400" />
+                <h3 className="text-sm font-bold text-white">Редактирование профиля студента</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingStudent(null)}
+                className="text-slate-400 hover:text-white text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveStudentEdit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Фамилия и Имя студента:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Учебная группа:
+                </label>
+                <select
+                  value={editGroupName}
+                  onChange={(e) => setEditGroupName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer font-mono"
+                >
+                  {academicGroups.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingStudent(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessingStudent || !editFullName.trim()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded-xl shadow-md shadow-indigo-600/30"
+                >
+                  Сохранить изменения
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

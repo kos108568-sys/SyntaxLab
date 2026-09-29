@@ -4,6 +4,7 @@ import { Navbar } from './components/Navbar';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { StudentView } from './components/student/StudentView';
 import { AuthScreen } from './components/AuthScreen';
+import { StudentOnboarding } from './components/student/StudentOnboarding';
 import { Terminal } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -23,6 +24,15 @@ const MainLayout: React.FC = () => {
   // If not authenticated via GitHub -> Show Login Screen
   if (!session || !currentUser) {
     return <AuthScreen />;
+  }
+
+  // If student is not yet approved -> Show Onboarding & Pending screen
+  if (currentUser.role === 'student' && !currentUser.isApproved) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-600/40">
+        <StudentOnboarding />
+      </div>
+    );
   }
 
   return (
