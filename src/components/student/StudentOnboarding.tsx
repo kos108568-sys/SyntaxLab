@@ -27,9 +27,7 @@ export const StudentOnboarding: React.FC = () => {
     loadAcademicGroups().then(loaded => {
       if (loaded.length > 0) {
         setGroups(loaded);
-        if (!loaded.includes(selectedGroup)) {
-          setSelectedGroup(loaded[0]);
-        }
+        setSelectedGroup(prev => (loaded.includes(prev) ? prev : loaded[0]));
       }
     });
   }, []);

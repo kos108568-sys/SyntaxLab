@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import type { Course, UserProfile, UserRole, Task } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -99,6 +99,8 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+const TEACHER_GITHUB_LOGINS = ['kos108568-sys', 'kos108568'];
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -118,8 +120,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
   const [broadcastMessage, setBroadcastMessage] = useState<string | null>(null);
-
-  const TEACHER_GITHUB_LOGINS = ['kos108568-sys', 'kos108568'];
 
   // Toggle course access per group
   const toggleCourseForGroup = async (groupName: string, courseId: string, enabled: boolean) => {
@@ -151,7 +151,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [userAllowedCourses, activeCourseId]);
 
   // 1. Загрузка профиля пользователя из Supabase
-  const syncUserProfile = async (user: User) => {
+  const syncUserProfile = useCallback(async (user: User) => {
     try {
       const { data } = await supabase
         .from('profiles')
@@ -219,10 +219,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('Error syncing profile:', err);
     }
-  };
+  }, []);
 
   // 2. Загрузка данных курса и прогресса из базы
-  const reloadFromDb = async () => {
+  const reloadFromDb = useCallback(async () => {
     if (!isSupabaseConfigured) return;
     try {
       const dbCourse = await loadCourseFromSupabase('csharp-foundations');
@@ -282,7 +282,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('Error loading data from Supabase:', err);
     }
-  };
+  }, []);
 
   // 3. Отслеживание авторизации Supabase (GitHub OAuth)
   useEffect(() => {
@@ -330,7 +330,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [syncUserProfile, reloadFromDb]);
 
   // 4. Подписка на Realtime аудиторный радар
   useEffect(() => {
@@ -343,7 +343,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         unsubscribe();
       };
     }
-  }, [session]);
+  }, [session, reloadFromDb]);
 
   const signOut = async () => {
     await supabase.auth.signOut();
