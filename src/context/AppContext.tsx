@@ -131,6 +131,29 @@ const DEFAULT_GROUP_ACCESS: Record<string, string[]> = {
   'ПО-43': ['git-branching', 'csharp-foundations']
 };
 
+const getInitialSession = (): Session | null => {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (
+        (key.startsWith('sb-') && key.endsWith('-auth-token')) ||
+        key === 'supabase.auth.token' ||
+        key.includes('auth-token')
+      )) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && (parsed.access_token || parsed.currentSession?.access_token)) {
+            return (parsed.currentSession || parsed) as Session;
+          }
+        }
+      }
+    }
+  } catch {}
+  return null;
+};
+
 const getInitialUser = (): UserProfile | null => {
   if (typeof window === 'undefined' || !window.localStorage) return null;
   try {
@@ -151,10 +174,15 @@ const getInitialGroupAccess = (): Record<string, string[]> => {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<Session | null>(() => getInitialSession());
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getInitialUser());
   const [role, setRole] = useState<UserRole>(() => getInitialUser()?.role || 'student');
-  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(() => hasStoredAuthToken());
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(() => {
+    // Если есть токен, но профиль еще ни разу не сохранялся в кэш — короткая начальная загрузка
+    const hasToken = hasStoredAuthToken();
+    const hasUser = Boolean(getInitialUser());
+    return hasToken && !hasUser;
+  });
 
   // Active course and group access state
   const [activeCourseId, setActiveCourseIdState] = useState<string>(() => {
@@ -395,15 +423,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
 
-    // Гарантированный таймаут разблокировки экрана через 1.5 секунды
+    // Гарантированный таймаут разблокировки экрана
     const safetyTimeout = setTimeout(() => {
       finishLoading();
-    }, 1500);
+    }, 600);
 
     const handleAuth = async (currentSession: Session | null) => {
       try {
         setSession(currentSession);
         if (currentSession?.user) {
+          // Если профиль уже восстановлен из кэша, разблокируем интерфейс мгновенно
+          finishLoading();
           await syncUserProfile(currentSession.user);
           await reloadFromDb(currentSession.user.id);
         } else {
