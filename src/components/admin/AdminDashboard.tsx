@@ -7,7 +7,8 @@ import {
   createAcademicGroup,
   deleteAcademicGroup,
   loadAllStudentsForTeacher,
-  updateAndApproveStudentProfile
+  updateAndApproveStudentProfile,
+  rejectStudentProfile
 } from '../../services/supabaseService';
 import {
   Users,
@@ -53,7 +54,7 @@ export const AdminDashboard: React.FC = () => {
   const [selectedStudentForHelp, setSelectedStudentForHelp] = useState<ClassroomStudentState | null>(null);
   const [helpCommentInput, setHelpCommentInput] = useState('');
   const [newAnnouncement, setNewAnnouncement] = useState('');
-  const [sqlCopied, setSqlCopied] = useState(false);
+  const [fixSqlCopied, setFixSqlCopied] = useState(false);
 
   // Groups and Students Moderation state
   const [academicGroups, setAcademicGroups] = useState<string[]>(['ИТ-301', 'ИТ-302', 'ПИ-201']);
@@ -61,6 +62,8 @@ export const AdminDashboard: React.FC = () => {
   const [allStudents, setAllStudents] = useState<any[]>([]);
   const [filterGroup, setFilterGroup] = useState<string>('all');
   const [isProcessingStudent, setIsProcessingStudent] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   // Edit student modal state
   const [editingStudent, setEditingStudent] = useState<any | null>(null);
@@ -110,7 +113,17 @@ export const AdminDashboard: React.FC = () => {
 
   const handleApproveStudent = async (studentId: string, fullName: string, groupName: string) => {
     setIsProcessingStudent(true);
-    await updateAndApproveStudentProfile(studentId, fullName, groupName, true);
+    setActionError(null);
+    setActionSuccess(null);
+    const success = await updateAndApproveStudentProfile(studentId, fullName, groupName, true);
+    if (!success) {
+      setActionError('Не удалось обновить статус студента в базе Supabase. Возможные причины: в базе отсутствуют нужные политики RLS для обновления профилей учителем или не создана функция approve_student. Запустите скрипт "fixApprovalAndRealtime.sql" во вкладке "Supabase & SQL".');
+    } else {
+      setActionSuccess(`Студент "${fullName}" успешно допущен к занятиям!`);
+      // Оптимистично обновляем локальный стейт, чтобы студент сразу исчез из ожидающих
+      setAllStudents(prev => prev.map(s => s.id === studentId ? { ...s, is_approved: true, full_name: fullName, group_name: groupName } : s));
+      setTimeout(() => setActionSuccess(null), 4000);
+    }
     await refreshStudentsAndGroups();
     setIsProcessingStudent(false);
   };
@@ -118,7 +131,16 @@ export const AdminDashboard: React.FC = () => {
   const handleRejectStudent = async (studentId: string) => {
     if (confirm('Отклонить заявку студента? Ему потребуется отправить заявку заново.')) {
       setIsProcessingStudent(true);
-      await updateAndApproveStudentProfile(studentId, 'Не подтвержден', '', false);
+      setActionError(null);
+      setActionSuccess(null);
+      const success = await rejectStudentProfile(studentId);
+      if (!success) {
+        setActionError('Не удалось отклонить заявку в базе данных Supabase.');
+      } else {
+        setActionSuccess('Заявка студента отклонена.');
+        setAllStudents(prev => prev.filter(s => s.id !== studentId));
+        setTimeout(() => setActionSuccess(null), 4000);
+      }
       await refreshStudentsAndGroups();
       setIsProcessingStudent(false);
     }
@@ -149,13 +171,21 @@ export const AdminDashboard: React.FC = () => {
     e.preventDefault();
     if (!editingStudent || !editFullName.trim()) return;
     setIsProcessingStudent(true);
-    await updateAndApproveStudentProfile(
+    setActionError(null);
+    setActionSuccess(null);
+    const success = await updateAndApproveStudentProfile(
       editingStudent.id,
       editFullName.trim(),
       editGroupName,
       editingStudent.is_approved
     );
-    setEditingStudent(null);
+    if (!success) {
+      setActionError('Не удалось сохранить изменения данных студента в базе данных.');
+    } else {
+      setActionSuccess(`Данные студента "${editFullName}" успешно обновлены.`);
+      setEditingStudent(null);
+      setTimeout(() => setActionSuccess(null), 4000);
+    }
     await refreshStudentsAndGroups();
     setIsProcessingStudent(false);
   };
@@ -188,22 +218,120 @@ export const AdminDashboard: React.FC = () => {
     setNewTaskInstructions('');
   };
 
-  const copySqlToClipboard = () => {
-    const sqlText = `-- Supabase Schema for SyntaxLab
-create table if not exists public.profiles (
-  id uuid references auth.users on delete cascade primary key,
-  email text not null,
-  full_name text not null,
-  role text not null check (role in ('teacher', 'student')),
-  group_name text default 'ИТ-301',
-  total_xp integer default 0
-);
--- Включить Realtime
-alter publication supabase_realtime add table public.classroom_sessions;`;
+  const FIX_SQL_SCRIPT = `-- ====================================================================
+-- SyntaxLab: Быстрый фикс для подтверждения заявок студентов и Realtime
+-- Запустите этот скрипт в Supabase -> SQL Editor -> Run
+-- ====================================================================
 
-    navigator.clipboard.writeText(sqlText);
-    setSqlCopied(true);
-    setTimeout(() => setSqlCopied(false), 2000);
+-- 1. Убедимся, что колонка is_approved есть в таблице profiles
+alter table public.profiles add column if not exists is_approved boolean default false;
+update public.profiles set is_approved = true where role = 'teacher';
+
+-- 2. Безопасная функция проверки роли преподавателя (без рекурсии в RLS)
+create or replace function public.is_teacher()
+returns boolean
+language sql
+stable
+security definer
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'teacher'
+  );
+$$;
+
+-- 3. Хранимая функция одобрения студента преподавателем (SECURITY DEFINER)
+create or replace function public.approve_student(
+  student_id uuid,
+  new_full_name text default null,
+  new_group_name text default null
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_is_teacher boolean;
+begin
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'teacher'
+  ) into caller_is_teacher;
+
+  if not caller_is_teacher then
+    raise exception 'Доступ запрещен: только преподаватель может подтверждать студентов';
+  end if;
+
+  update public.profiles
+  set
+    is_approved = true,
+    full_name = coalesce(nullif(trim(new_full_name), ''), full_name),
+    group_name = coalesce(nullif(trim(new_group_name), ''), group_name)
+  where id = student_id;
+
+  return true;
+end;
+$$;
+
+-- 4. Хранимая функция отклонения студента (SECURITY DEFINER)
+create or replace function public.reject_student(
+  student_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_is_teacher boolean;
+begin
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'teacher'
+  ) into caller_is_teacher;
+
+  if not caller_is_teacher then
+    raise exception 'Доступ запрещен: только преподаватель может отклонять заявки';
+  end if;
+
+  update public.profiles
+  set
+    is_approved = false,
+    group_name = null
+  where id = student_id;
+
+  return true;
+end;
+$$;
+
+-- 5. Настройка RLS политик на public.profiles
+alter table public.profiles enable row level security;
+
+drop policy if exists "Profiles visible to all users" on public.profiles;
+drop policy if exists "Profiles visible to authenticated users" on public.profiles;
+create policy "Profiles visible to authenticated users" on public.profiles
+  for select using (true);
+
+drop policy if exists "Users update own profile" on public.profiles;
+create policy "Users update own profile" on public.profiles
+  for update using (auth.uid() = id);
+
+drop policy if exists "Teachers can update student profiles" on public.profiles;
+create policy "Teachers can update student profiles" on public.profiles
+  for update using (public.is_teacher());
+
+-- 6. Добавление profiles в публикацию Supabase Realtime
+do $$
+begin
+  alter publication supabase_realtime add table public.profiles;
+exception when duplicate_object then null;
+end $$;`;
+
+  const copyFixSqlToClipboard = () => {
+    navigator.clipboard.writeText(FIX_SQL_SCRIPT);
+    setFixSqlCopied(true);
+    setTimeout(() => setFixSqlCopied(false), 2000);
   };
 
   return (
@@ -560,6 +688,29 @@ alter publication supabase_realtime add table public.classroom_sessions;`;
       {activeTab === 'students' && (
         <div className="space-y-6">
           
+          {actionError && (
+            <div className="p-4 bg-red-950/70 border border-red-500/40 rounded-2xl text-xs text-red-200 flex items-start justify-between gap-3 shadow-lg shadow-red-950/30">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-red-300 block mb-0.5">Внимание: ошибка обновления в Supabase</span>
+                  <p className="leading-relaxed text-red-200/90">{actionError}</p>
+                </div>
+              </div>
+              <button onClick={() => setActionError(null)} className="text-red-400 hover:text-white p-1">✕</button>
+            </div>
+          )}
+
+          {actionSuccess && (
+            <div className="p-3.5 bg-emerald-950/70 border border-emerald-500/40 rounded-2xl text-xs text-emerald-200 flex items-center justify-between gap-3 shadow-lg shadow-emerald-950/30">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-semibold text-emerald-200">{actionSuccess}</span>
+              </div>
+              <button onClick={() => setActionSuccess(null)} className="text-emerald-400 hover:text-white p-1">✕</button>
+            </div>
+          )}
+
           {/* SECTION 1: PENDING STUDENT APPROVALS */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1111,43 +1262,28 @@ alter publication supabase_realtime add table public.classroom_sessions;`;
 
             <div className="mt-6 pt-4 border-t border-slate-800">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Полный SQL-скрипт схемы, RLS и C# заданий:
-                </h3>
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    SQL-скрипт исправления доступа и подтверждения студентов (RLS + RPC):
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Создает безопасные функции approve_student/reject_student и настраивает RLS политики для преподавателя.
+                  </p>
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={copySqlToClipboard}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm shadow-indigo-600/30 transition-all"
+                    onClick={copyFixSqlToClipboard}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm shadow-emerald-600/30 transition-all shrink-0"
                   >
-                    {sqlCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{sqlCopied ? 'Скопировано!' : 'Скопировать полный SQL'}</span>
+                    {fixSqlCopied ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{fixSqlCopied ? 'Скопировано!' : 'Скопировать SQL-фикс'}</span>
                   </button>
                 </div>
               </div>
 
-              <pre className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[11px] text-indigo-300 overflow-x-auto max-h-60">
-{`-- Создание таблиц платформы SyntaxLab
-create table if not exists public.profiles (
-  id uuid references auth.users on delete cascade primary key,
-  email text not null,
-  full_name text not null,
-  role text not null check (role in ('teacher', 'student')),
-  group_name text default 'ИТ-301',
-  total_xp integer default 0
-);
-
-create table if not exists public.classroom_sessions (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null unique,
-  group_name text not null,
-  active_task_id text,
-  status text not null check (status in ('active', 'stuck', 'completed_step', 'idle')),
-  needs_help boolean default false,
-  help_message text
-);
-
-alter publication supabase_realtime add table public.classroom_sessions;`}
+              <pre className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[11px] text-emerald-300/90 overflow-x-auto max-h-72">
+{FIX_SQL_SCRIPT}
               </pre>
             </div>
           </div>

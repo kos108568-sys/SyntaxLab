@@ -330,18 +330,82 @@ export async function updateAndApproveStudentProfile(
 ): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
   try {
-    const { error } = await supabase
+    // 1. Попытка через безопасную RPC функцию approve_student (обходит RLS через security definer)
+    if (isApproved) {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('approve_student', {
+        student_id: userId,
+        new_full_name: fullName.trim(),
+        new_group_name: groupName.trim()
+      });
+
+      if (!rpcError && rpcData === true) {
+        console.log('Студент успешно подтвержден через RPC approve_student:', userId);
+        return true;
+      }
+      if (rpcError && rpcError.code !== 'PGRST202') {
+        console.warn('RPC approve_student вернул ошибку:', rpcError);
+      }
+    }
+
+    // 2. Прямой UPDATE таблицы profiles с проверкой возвращенных строк
+    const { data, error } = await supabase
       .from('profiles')
       .update({
         full_name: fullName.trim(),
         group_name: groupName.trim(),
         is_approved: isApproved
       })
-      .eq('id', userId);
+      .eq('id', userId)
+      .select();
 
-    return !error;
+    if (error) {
+      console.error('Ошибка прямого обновления профиля студента в Supabase:', error);
+      return false;
+    }
+
+    if (!data || data.length === 0) {
+      console.warn('Supabase не обновил ни одной строки для студента', userId, '— вероятно, блокируется политикой RLS.');
+      return false;
+    }
+
+    console.log('Профиль студента успешно обновлен напрямую в profiles:', data);
+    return true;
   } catch (err) {
-    console.error('Error updating student profile:', err);
+    console.error('Исключение при обновлении профиля студента:', err);
+    return false;
+  }
+}
+
+// 11.1 Отклонение заявки студента преподавателем
+export async function rejectStudentProfile(userId: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc('reject_student', {
+      student_id: userId
+    });
+
+    if (!rpcError && rpcData === true) {
+      console.log('Студент отклонен через RPC reject_student:', userId);
+      return true;
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({
+        is_approved: false,
+        group_name: ''
+      })
+      .eq('id', userId)
+      .select();
+
+    if (error) {
+      console.error('Ошибка при отклонении студента в Supabase:', error);
+      return false;
+    }
+
+    return Boolean(data && data.length > 0);
+  } catch (err) {
+    console.error('Исключение при отклонении студента:', err);
     return false;
   }
 }

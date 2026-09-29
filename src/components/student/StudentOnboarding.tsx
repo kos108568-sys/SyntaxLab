@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { supabase } from '../../lib/supabase';
 import { 
   loadAcademicGroups, 
   submitStudentOnboarding 
@@ -32,6 +33,42 @@ export const StudentOnboarding: React.FC = () => {
       }
     });
   }, []);
+
+  // Автоматическое отслеживание одобрения заявки преподавателем в реальном времени
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    // 1. Подписка через Supabase Realtime на изменение профиля
+    const channel = supabase
+      .channel(`profile_approval_${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${currentUser.id}`
+        },
+        (payload: any) => {
+          if (payload.new?.is_approved) {
+            reloadFromDb();
+          }
+        }
+      )
+      .subscribe();
+
+    // 2. Фоновый опрос (polling каждые 3 секунды) на случай задержки веб-сокетов
+    const interval = setInterval(() => {
+      if (Boolean(currentUser.groupName) && !currentUser.isApproved) {
+        reloadFromDb();
+      }
+    }, 3000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
+  }, [currentUser?.id, currentUser?.groupName, currentUser?.isApproved, reloadFromDb]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
