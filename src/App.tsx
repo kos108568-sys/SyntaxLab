@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppProvider, useApp } from './context/AppContext';
+import { AppProvider, useApp, hasStoredAuthToken } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { StudentView } from './components/student/StudentView';
@@ -19,23 +19,26 @@ const MainLayout: React.FC = () => {
     isLoadingAuth 
   } = useApp();
 
-  if (isLoadingAuth || (session && !currentUser)) {
+  const hasToken = hasStoredAuthToken();
+
+  // Если идет проверка авторизации или в браузере сохранен токен, но данные еще подгружаются — показываем чистый экран синхронизации
+  if (isLoadingAuth || (hasToken && (!session || !currentUser))) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
         <div className="w-10 h-10 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 animate-pulse">
           <Terminal className="w-5 h-5 animate-spin" />
         </div>
-        <p className="text-xs font-mono">Проверка сессии GitHub...</p>
+        <p className="text-xs font-mono">Синхронизация профиля и курсов...</p>
       </div>
     );
   }
 
-  // If not authenticated via GitHub -> Show Login Screen
-  if (!session) {
+  // Если точно не авторизован через GitHub -> Экран входа
+  if (!session || !currentUser) {
     return <AuthScreen />;
   }
 
-  // If student is not yet approved -> Show Onboarding & Pending screen
+  // Если студент еще не одобрен -> Экран ожидания/онбординга
   if (currentUser.role === 'student' && !currentUser.isApproved) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-600/40">

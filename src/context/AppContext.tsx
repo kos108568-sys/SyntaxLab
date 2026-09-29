@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useCall
 import type { Session, User } from '@supabase/supabase-js';
 import type { Course, UserProfile, UserRole, Task } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { initialCsharpCourse } from '../data/csharpCourse';
 import {
   loadCourseFromSupabase,
   loadClassroomSessionsFromDb,
@@ -94,28 +95,87 @@ interface AppContextType {
   signOut: () => Promise<void>;
   isLoadingAuth: boolean;
   isSupabaseConnected: boolean;
-  reloadFromDb: () => Promise<void>;
+  reloadFromDb: (explicitUserId?: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const TEACHER_GITHUB_LOGINS = ['kos108568-sys', 'kos108568'];
 
+export const hasStoredAuthToken = (): boolean => {
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (
+        (key.startsWith('sb-') && key.endsWith('-auth-token')) ||
+        key === 'supabase.auth.token' ||
+        key.includes('auth-token')
+      )) {
+        const raw = localStorage.getItem(key);
+        if (raw && (raw.includes('access_token') || raw.includes('currentSession'))) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+};
+
+const DEFAULT_GROUP_ACCESS: Record<string, string[]> = {
+  'ИТ-301': ['csharp-foundations', 'git-branching'],
+  'ИТ-302': ['csharp-foundations'],
+  'ПИ-201': ['csharp-foundations', 'git-branching'],
+  'ПО-43': ['git-branching', 'csharp-foundations']
+};
+
+const getInitialUser = (): UserProfile | null => {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = localStorage.getItem('syntaxlab_cached_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getInitialGroupAccess = (): Record<string, string[]> => {
+  if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_GROUP_ACCESS;
+  try {
+    const raw = localStorage.getItem('syntaxlab_cached_group_access');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return DEFAULT_GROUP_ACCESS;
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [role, setRole] = useState<UserRole>('student');
-  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getInitialUser());
+  const [role, setRole] = useState<UserRole>(() => getInitialUser()?.role || 'student');
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(() => hasStoredAuthToken());
 
   // Active course and group access state
-  const [activeCourseId, setActiveCourseId] = useState<string>('csharp-foundations');
-  const [groupCourseAccess, setGroupCourseAccess] = useState<Record<string, string[]>>({
-    'ИТ-301': ['csharp-foundations', 'git-branching'],
-    'ИТ-302': ['csharp-foundations'],
-    'ПИ-201': ['csharp-foundations', 'git-branching']
+  const [activeCourseId, setActiveCourseIdState] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('syntaxlab_active_course_id');
+      if (saved) return saved;
+      const initialUser = getInitialUser();
+      if (initialUser?.groupName === 'ПО-43') return 'git-branching';
+    } catch {}
+    return 'csharp-foundations';
   });
 
-  const [course, setCourse] = useState<Course | null>(null);
+  const setActiveCourseId = useCallback((id: string) => {
+    setActiveCourseIdState(id);
+    try {
+      localStorage.setItem('syntaxlab_active_course_id', id);
+    } catch {}
+  }, []);
+
+  const [groupCourseAccess, setGroupCourseAccess] = useState<Record<string, string[]>>(() => getInitialGroupAccess());
+  const [course, setCourse] = useState<Course | null>(initialCsharpCourse);
   const [studentsInClass, setStudentsInClass] = useState<ClassroomStudentState[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
@@ -128,7 +188,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = enabled 
         ? (current.includes(courseId) ? current : [...current, courseId])
         : current.filter(id => id !== courseId);
-      return { ...prev, [groupName]: updated };
+      const next = { ...prev, [groupName]: updated };
+      try {
+        localStorage.setItem('syntaxlab_cached_group_access', JSON.stringify(next));
+      } catch {}
+      return next;
     });
     await toggleGroupCourseAccess(groupName, courseId, enabled);
   };
@@ -139,7 +203,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return ALL_COURSES;
     }
     const studentGroup = currentUser?.groupName || '';
-    const allowedIds = groupCourseAccess[studentGroup] || [];
+    if (!studentGroup) return ALL_COURSES;
+    const allowedIds = groupCourseAccess[studentGroup];
+    if (!allowedIds || allowedIds.length === 0) {
+      return ALL_COURSES;
+    }
     return ALL_COURSES.filter(c => allowedIds.includes(c.id));
   }, [role, currentUser, groupCourseAccess]);
 
@@ -148,7 +216,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (userAllowedCourses.length > 0 && !userAllowedCourses.some(c => c.id === activeCourseId)) {
       setActiveCourseId(userAllowedCourses[0].id);
     }
-  }, [userAllowedCourses, activeCourseId]);
+  }, [userAllowedCourses, activeCourseId, setActiveCourseId]);
 
   // 1. Загрузка профиля пользователя из Supabase
   const syncUserProfile = useCallback(async (user: User) => {
@@ -194,6 +262,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         setCurrentUser(newProfile);
         setRole(resolvedRole);
+        try {
+          localStorage.setItem('syntaxlab_cached_user', JSON.stringify(newProfile));
+        } catch {}
       } else {
         // Если пользователь преподаватель, но в БД еще значился студентом — обновляем в БД
         if (isTeacher && data.role !== 'teacher') {
@@ -215,6 +286,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         setCurrentUser(existingProfile);
         setRole(resolvedRole);
+        try {
+          localStorage.setItem('syntaxlab_cached_user', JSON.stringify(existingProfile));
+        } catch {}
       }
     } catch (err) {
       console.error('Error syncing profile:', err);
@@ -222,112 +296,140 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // 2. Загрузка данных курса и прогресса из базы
-  const reloadFromDb = useCallback(async () => {
+  const reloadFromDb = useCallback(async (explicitUserId?: string) => {
     if (!isSupabaseConfigured) return;
     try {
-      const dbCourse = await loadCourseFromSupabase('csharp-foundations');
+      const activeUserId = explicitUserId || session?.user?.id;
+
+      // Параллельная загрузка всех данных для мгновенного отклика
+      const [dbCourse, dbSessions, profRes, progressRes, groupAccess] = await Promise.all([
+        loadCourseFromSupabase('csharp-foundations'),
+        loadClassroomSessionsFromDb('ИТ-301'),
+        activeUserId 
+          ? supabase.from('profiles').select('*').eq('id', activeUserId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        activeUserId
+          ? supabase.from('student_progress').select('task_id').eq('user_id', activeUserId).eq('status', 'completed')
+          : Promise.resolve({ data: null, error: null }),
+        loadGroupCourseAccess()
+      ]);
+
       if (dbCourse) {
         setCourse(dbCourse);
       }
 
-      const dbSessions = await loadClassroomSessionsFromDb('ИТ-301');
-      setStudentsInClass(dbSessions);
+      if (dbSessions) {
+        setStudentsInClass(dbSessions);
+      }
 
-      // Проверяем актуальный статус профиля (например, подтверждение учителем или смену имени)
-      const { data: { session: activeSession } } = await supabase.auth.getSession();
-      const activeUserId = activeSession?.user?.id;
-      if (activeUserId) {
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', activeUserId)
-          .maybeSingle();
-
-        if (prof) {
-          const githubLogin = (activeSession?.user?.user_metadata?.user_name || activeSession?.user?.user_metadata?.preferred_username || '').toLowerCase();
-          const isTeacher = TEACHER_GITHUB_LOGINS.includes(githubLogin);
-          setCurrentUser(prev => ({
-            id: prof.id,
-            email: prof.email || prev?.email || '',
-            fullName: prof.full_name || prev?.fullName || '',
-            avatarUrl: prof.avatar_url || prev?.avatarUrl,
-            role: isTeacher ? 'teacher' : ((prof.role as UserRole) || 'student'),
-            groupName: prof.group_name || (isTeacher ? 'Преподавательский состав' : ''),
-            isApproved: isTeacher ? true : (prof.is_approved ?? false),
-            currentStreakDays: prof.streak_days || 1,
-            totalXp: prof.total_xp || 0,
-            isOnline: true
-          }));
-        }
+      // Проверяем актуальный статус профиля
+      if (profRes && 'data' in profRes && profRes.data) {
+        const prof = profRes.data;
+        const githubMetadata = session?.user?.user_metadata || {};
+        const githubLogin = (githubMetadata.user_name || githubMetadata.preferred_username || '').toLowerCase();
+        const isTeacher = TEACHER_GITHUB_LOGINS.includes(githubLogin);
+        const updatedProfile: UserProfile = {
+          id: prof.id,
+          email: prof.email || session?.user?.email || '',
+          fullName: prof.full_name || githubMetadata.full_name || 'Студент',
+          avatarUrl: prof.avatar_url || githubMetadata.avatar_url,
+          role: isTeacher ? 'teacher' : ((prof.role as UserRole) || 'student'),
+          groupName: prof.group_name || (isTeacher ? 'Преподавательский состав' : ''),
+          isApproved: isTeacher ? true : (prof.is_approved ?? false),
+          currentStreakDays: prof.streak_days || 1,
+          totalXp: prof.total_xp || 0,
+          isOnline: true
+        };
+        setCurrentUser(updatedProfile);
+        try {
+          localStorage.setItem('syntaxlab_cached_user', JSON.stringify(updatedProfile));
+        } catch {}
       }
 
       // Загрузка решенных задач для текущего пользователя
-      if (activeUserId) {
-        const { data: progressData } = await supabase
-          .from('student_progress')
-          .select('task_id')
-          .eq('user_id', activeUserId)
-          .eq('status', 'completed');
-
-        if (progressData) {
-          setCompletedTaskIds(progressData.map(p => p.task_id));
-        }
+      if (progressRes && 'data' in progressRes && progressRes.data) {
+        setCompletedTaskIds(progressRes.data.map((p: any) => p.task_id));
       }
 
       // Загрузка прав доступа групп к курсам
-      const groupAccess = await loadGroupCourseAccess();
       if (groupAccess && Object.keys(groupAccess).length > 0) {
         setGroupCourseAccess(groupAccess);
+        try {
+          localStorage.setItem('syntaxlab_cached_group_access', JSON.stringify(groupAccess));
+        } catch {}
       }
     } catch (err) {
       console.error('Error loading data from Supabase:', err);
     }
-  }, []);
+  }, [session]);
 
   // 3. Отслеживание авторизации Supabase (GitHub OAuth)
   useEffect(() => {
     let isMounted = true;
 
-    const initAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!isMounted) return;
-        setSession(session);
-        if (session?.user) {
-          await syncUserProfile(session.user);
-          await reloadFromDb();
-        }
-      } catch (err) {
-        console.error('Error initializing auth:', err);
-      } finally {
-        if (isMounted) {
-          setIsLoadingAuth(false);
-        }
+    const handleAuth = async (currentSession: Session | null) => {
+      setSession(currentSession);
+      if (currentSession?.user) {
+        await syncUserProfile(currentSession.user);
+        await reloadFromDb(currentSession.user.id);
+      } else {
+        setCurrentUser(null);
+      }
+      if (isMounted) {
+        setIsLoadingAuth(false);
       }
     };
 
-    initAuth();
+    // Проверяем сессию при инициализации
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      if (!isMounted) return;
+      if (initialSession) {
+        handleAuth(initialSession);
+      } else if (!hasStoredAuthToken()) {
+        setIsLoadingAuth(false);
+      }
+    });
 
     const {
       data: { subscription }
     } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!isMounted) return;
-      if (event === 'INITIAL_SESSION') return;
 
-      setSession(newSession);
-      if (newSession?.user) {
-        setIsLoadingAuth(true);
-        await syncUserProfile(newSession.user);
-        await reloadFromDb();
-        if (isMounted) setIsLoadingAuth(false);
-      } else {
+      if (event === 'INITIAL_SESSION') {
+        if (newSession) {
+          await handleAuth(newSession);
+        } else if (!hasStoredAuthToken()) {
+          setIsLoadingAuth(false);
+        }
+        return;
+      }
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        if (newSession) {
+          await handleAuth(newSession);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setSession(null);
         setCurrentUser(null);
+        try {
+          localStorage.removeItem('syntaxlab_cached_user');
+          localStorage.removeItem('syntaxlab_cached_group_access');
+          localStorage.removeItem('syntaxlab_active_course_id');
+        } catch {}
         if (isMounted) setIsLoadingAuth(false);
       }
     });
 
+    // Страховочный таймаут (если сеть заблокирована или токен поврежден)
+    const safetyTimeout = setTimeout(() => {
+      if (isMounted) {
+        setIsLoadingAuth(false);
+      }
+    }, 2500);
+
     return () => {
       isMounted = false;
+      clearTimeout(safetyTimeout);
       subscription.unsubscribe();
     };
   }, [syncUserProfile, reloadFromDb]);
@@ -335,7 +437,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 4. Подписка на Realtime аудиторный радар
   useEffect(() => {
     if (session && isSupabaseConfigured) {
-      reloadFromDb();
       const unsubscribe = subscribeToClassroomRealtime('ИТ-301', () => {
         reloadFromDb();
       });
@@ -346,9 +447,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [session, reloadFromDb]);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setSession(null);
-    setCurrentUser(null);
+    try {
+      localStorage.removeItem('syntaxlab_cached_user');
+      localStorage.removeItem('syntaxlab_cached_group_access');
+      localStorage.removeItem('syntaxlab_active_course_id');
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Error signing out:', err);
+    } finally {
+      setSession(null);
+      setCurrentUser(null);
+      setRole('student');
+      setIsLoadingAuth(false);
+    }
   };
 
   const completeTask = (taskId: string, xpEarned: number) => {
