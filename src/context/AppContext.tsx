@@ -78,6 +78,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
   const [broadcastMessage, setBroadcastMessage] = useState<string | null>(null);
 
+  const TEACHER_GITHUB_LOGINS = ['kos108568-sys', 'kos108568'];
+
   // 1. Загрузка профиля пользователя из Supabase
   const syncUserProfile = async (user: User) => {
     try {
@@ -88,20 +90,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .maybeSingle();
 
       const githubMetadata = user.user_metadata || {};
+      const githubLogin = (githubMetadata.user_name || githubMetadata.preferred_username || '').toLowerCase();
+      const isTeacher = TEACHER_GITHUB_LOGINS.includes(githubLogin);
+      
       const fullName = githubMetadata.full_name || githubMetadata.user_name || user.email?.split('@')[0] || 'Разработчик';
       const avatarUrl = githubMetadata.avatar_url;
+      const resolvedRole: UserRole = isTeacher ? 'teacher' : ((data?.role as UserRole) || 'student');
 
       if (!data) {
-        // Создаем профиль, если еще не создан
+        // Создаем профиль в базе данных
         const newProfile: UserProfile = {
           id: user.id,
           email: user.email || '',
           fullName,
           avatarUrl,
-          role: 'student',
-          groupName: 'ИТ-301',
+          role: resolvedRole,
+          groupName: isTeacher ? 'Преподавательский состав' : 'ИТ-301',
           currentStreakDays: 1,
-          totalXp: 0,
+          totalXp: isTeacher ? 1000 : 0,
           isOnline: true
         };
 
@@ -110,27 +116,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           email: user.email,
           full_name: fullName,
           avatar_url: avatarUrl,
-          role: 'student',
-          groupName: 'ИТ-301'
+          role: resolvedRole,
+          groupName: isTeacher ? 'Преподавательский состав' : 'ИТ-301'
         });
 
         setCurrentUser(newProfile);
-        setRole('student');
+        setRole(resolvedRole);
       } else {
+        // Если пользователь преподаватель, но в БД еще значился студентом — обновляем в БД
+        if (isTeacher && data.role !== 'teacher') {
+          await supabase.from('profiles').update({ role: 'teacher' }).eq('id', user.id);
+        }
+
         const existingProfile: UserProfile = {
           id: data.id,
           email: data.email,
           fullName: data.full_name || fullName,
           avatarUrl: data.avatar_url || avatarUrl,
-          role: data.role as UserRole,
-          groupName: data.group_name || 'ИТ-301',
+          role: resolvedRole,
+          groupName: data.group_name || (isTeacher ? 'Преподавательский состав' : 'ИТ-301'),
           currentStreakDays: data.streak_days || 1,
           totalXp: data.total_xp || 0,
           isOnline: true
         };
 
         setCurrentUser(existingProfile);
-        setRole(data.role as UserRole);
+        setRole(resolvedRole);
       }
     } catch (err) {
       console.error('Error syncing profile:', err);

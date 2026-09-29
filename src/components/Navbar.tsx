@@ -71,33 +71,40 @@ export const Navbar: React.FC = () => {
         {/* Right Section: Role Switcher & User Profile */}
         <div className="flex items-center gap-3">
           
-          {/* Quick Role Switcher Button */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
-            <button
-              type="button"
-              onClick={() => setRole('teacher')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                role === 'teacher'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Админка</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setRole('student')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                role === 'student'
-                  ? 'bg-violet-600 text-white shadow-md shadow-violet-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <GraduationCap className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Студент</span>
-            </button>
-          </div>
+          {/* Quick Role Switcher Button - Only accessible to Teachers */}
+          {currentUser?.role === 'teacher' ? (
+            <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setRole('teacher')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  role === 'teacher'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Админка</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRole('student')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  role === 'student'
+                    ? 'bg-violet-600 text-white shadow-md shadow-violet-600/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <GraduationCap className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Демо студента</span>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/10 border border-violet-500/20 text-violet-300 rounded-xl text-xs font-semibold">
+              <GraduationCap className="w-3.5 h-3.5 text-violet-400" />
+              <span>Студент ({currentUser?.groupName || 'ИТ-301'})</span>
+            </div>
+          )}
 
           {/* User Status / Profile info */}
           {currentUser && (
