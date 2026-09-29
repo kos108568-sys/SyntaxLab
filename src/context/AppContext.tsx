@@ -344,16 +344,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return [];
         }),
         activeUserId 
-          ? supabase.from('profiles').select('*').eq('id', activeUserId).maybeSingle().catch(err => {
-              console.warn('Error loading profile:', err);
-              return { data: null, error: null };
-            })
+          ? supabase.from('profiles').select('*').eq('id', activeUserId).maybeSingle()
           : Promise.resolve({ data: null, error: null }),
         activeUserId
-          ? supabase.from('student_progress').select('task_id').eq('user_id', activeUserId).eq('status', 'completed').catch(err => {
-              console.warn('Error loading progress:', err);
-              return { data: null, error: null };
-            })
+          ? supabase.from('student_progress').select('task_id').eq('user_id', activeUserId).eq('status', 'completed')
           : Promise.resolve({ data: null, error: null }),
         loadGroupCourseAccess().catch(err => {
           console.warn('Error loading group access:', err);
