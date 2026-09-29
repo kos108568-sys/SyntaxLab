@@ -30,7 +30,8 @@ import {
   Edit2,
   Trash2,
   FolderPlus,
-  GraduationCap
+  GraduationCap,
+  GitBranch
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -42,7 +43,10 @@ export const AdminDashboard: React.FC = () => {
     addNewTask,
     broadcastMessage,
     setBroadcastMessage,
-    isSupabaseConnected
+    isSupabaseConnected,
+    availableCourses,
+    groupCourseAccess,
+    toggleCourseForGroup
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'radar' | 'students' | 'curriculum' | 'gradebook' | 'database'>('radar');
@@ -682,27 +686,63 @@ alter publication supabase_realtime add table public.classroom_sessions;`;
               </button>
             </form>
 
-            {/* Existing groups list */}
-            <div className="flex flex-wrap gap-2.5 pt-2">
+            {/* Existing groups list with Course Access Control */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-2">
               {academicGroups.map((group) => {
                 const countInGroup = allStudents.filter(s => s.group_name === group && s.is_approved).length;
+                const allowedCourses = groupCourseAccess[group] || [];
 
                 return (
                   <div
                     key={group}
-                    className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3.5 py-2 rounded-xl text-xs"
+                    className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-md"
                   >
-                    <GraduationCap className="w-4 h-4 text-indigo-400" />
-                    <span className="font-bold text-white font-mono">{group}</span>
-                    <span className="text-slate-500 text-[11px]">({countInGroup} студ.)</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteGroup(group)}
-                      title="Удалить группу"
-                      className="text-slate-500 hover:text-red-400 transition-colors ml-1 p-0.5 rounded"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                      <div className="flex items-center gap-2">
+                        <GraduationCap className="w-4 h-4 text-indigo-400" />
+                        <span className="font-bold text-white font-mono text-sm">{group}</span>
+                        <span className="text-slate-500 text-[11px]">({countInGroup} студ.)</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteGroup(group)}
+                        title="Удалить группу"
+                        className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded hover:bg-slate-900"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Course Access Checkboxes */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                        Доступные курсы:
+                      </span>
+                      {availableCourses.map((c) => {
+                        const isChecked = allowedCourses.includes(c.id);
+                        return (
+                          <label
+                            key={c.id}
+                            className="flex items-center gap-2 text-xs text-slate-300 hover:text-white cursor-pointer select-none py-0.5"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => toggleCourseForGroup(group, c.id, e.target.checked)}
+                              className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                            />
+                            <span className="flex items-center gap-1.5">
+                              {c.id === 'git-branching' ? (
+                                <GitBranch className="w-3 h-3 text-amber-400" />
+                              ) : (
+                                <FileCode className="w-3 h-3 text-indigo-400" />
+                              )}
+                              <span>{c.title}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}

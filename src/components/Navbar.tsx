@@ -6,7 +6,9 @@ import {
   CheckCircle2, 
   AlertTriangle,
   ShieldCheck,
-  LogOut
+  LogOut,
+  GitBranch,
+  FileCode
 } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
@@ -15,6 +17,9 @@ export const Navbar: React.FC = () => {
     setRole, 
     currentUser, 
     studentsInClass, 
+    activeCourseId,
+    setActiveCourseId,
+    userAllowedCourses,
     signOut 
   } = useApp();
 
@@ -35,13 +40,50 @@ export const Navbar: React.FC = () => {
               <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
                 SyntaxLab
               </span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                C# .NET 8
-              </span>
             </div>
             <p className="text-[11px] text-slate-400">Академическая платформа для аудиторных занятий</p>
           </div>
         </div>
+
+        {/* Active Course Switcher */}
+        {userAllowedCourses.length > 1 ? (
+          <div className="hidden sm:flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 shadow-inner">
+            {userAllowedCourses.map((c) => {
+              const isActive = activeCourseId === c.id;
+              const Icon = c.id === 'git-branching' ? GitBranch : FileCode;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setActiveCourseId(c.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    isActive
+                      ? c.id === 'git-branching'
+                        ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-md shadow-orange-600/25'
+                        : 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{c.title}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : userAllowedCourses.length === 1 ? (
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-300">
+            {userAllowedCourses[0].id === 'git-branching' ? (
+              <GitBranch className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <FileCode className="w-3.5 h-3.5 text-indigo-400" />
+            )}
+            <span>{userAllowedCourses[0].title}</span>
+          </div>
+        ) : (
+          <span className="hidden sm:inline text-xs text-amber-400/80 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+            Курсы не назначены
+          </span>
+        )}
 
         {/* Live Classroom Radar Badge */}
         <div className="hidden md:flex items-center gap-2 bg-slate-950/60 border border-slate-800/80 rounded-full px-3 py-1.5 text-xs">

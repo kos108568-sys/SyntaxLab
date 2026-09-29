@@ -30,6 +30,23 @@ create table if not exists public.academic_groups (
 
 insert into public.academic_groups (name) values ('ИТ-301'), ('ИТ-302'), ('ПИ-201') on conflict (name) do nothing;
 
+-- 1.2 ТАБЛИЦА ДОСТУПА ГРУПП К КУРСАМ (Многие ко многим)
+create table if not exists public.group_courses (
+  id uuid default gen_random_uuid() primary key,
+  group_name text not null,
+  course_id text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(group_name, course_id)
+);
+
+-- По умолчанию открываем C# и Git для ИТ-301, C# для ИТ-302, Git для ПИ-201
+insert into public.group_courses (group_name, course_id) values
+  ('ИТ-301', 'csharp-foundations'),
+  ('ИТ-301', 'git-branching'),
+  ('ИТ-302', 'csharp-foundations'),
+  ('ПИ-201', 'git-branching')
+on conflict (group_name, course_id) do nothing;
+
 
 -- 2. ТАБЛИЦА КУРСОВ
 create table if not exists public.courses (
@@ -175,6 +192,14 @@ create policy "Groups readable by all" on public.academic_groups for select usin
 
 drop policy if exists "Groups editable by teachers" on public.academic_groups;
 create policy "Groups editable by teachers" on public.academic_groups for all using (true);
+
+-- Доступ групп к курсам
+alter table public.group_courses enable row level security;
+drop policy if exists "Group courses readable by all" on public.group_courses;
+create policy "Group courses readable by all" on public.group_courses for select using (true);
+
+drop policy if exists "Group courses editable by teachers" on public.group_courses;
+create policy "Group courses editable by teachers" on public.group_courses for all using (true);
 
 drop policy if exists "Courses are readable by everyone" on public.courses;
 create policy "Courses are readable by everyone" on public.courses for select using (true);

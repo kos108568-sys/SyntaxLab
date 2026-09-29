@@ -370,3 +370,70 @@ export async function submitStudentOnboarding(
   }
 }
 
+// 13. Загрузка сопоставления курсов по группам (какой курс каким группам открыт)
+export async function loadGroupCourseAccess(): Promise<Record<string, string[]>> {
+  if (!isSupabaseConfigured) {
+    return {
+      'ИТ-301': ['csharp-foundations', 'git-branching'],
+      'ИТ-302': ['csharp-foundations'],
+      'ПИ-201': ['git-branching']
+    };
+  }
+  try {
+    const { data, error } = await supabase
+      .from('group_courses')
+      .select('group_name, course_id');
+
+    if (error || !data) {
+      // Таблица может еще не существовать, возвращаем базовое сопоставление
+      return {
+        'ИТ-301': ['csharp-foundations', 'git-branching'],
+        'ИТ-302': ['csharp-foundations'],
+        'ПИ-201': ['csharp-foundations', 'git-branching']
+      };
+    }
+
+    const mapping: Record<string, string[]> = {};
+    for (const item of data) {
+      if (!mapping[item.group_name]) {
+        mapping[item.group_name] = [];
+      }
+      mapping[item.group_name].push(item.course_id);
+    }
+    return mapping;
+  } catch (err) {
+    console.warn('Error loading group_courses:', err);
+    return {};
+  }
+}
+
+// 14. Переключение доступа группы к курсу преподавателем
+export async function toggleGroupCourseAccess(
+  groupName: string,
+  courseId: string,
+  enabled: boolean
+): Promise<boolean> {
+  if (!isSupabaseConfigured) return true;
+  try {
+    if (enabled) {
+      const { error } = await supabase
+        .from('group_courses')
+        .upsert(
+          { group_name: groupName, course_id: courseId },
+          { onConflict: 'group_name,course_id' }
+        );
+      return !error;
+    } else {
+      const { error } = await supabase
+        .from('group_courses')
+        .delete()
+        .eq('group_name', groupName)
+        .eq('course_id', courseId);
+      return !error;
+    }
+  } catch (err) {
+    console.error('Error toggling group course access:', err);
+    return false;
+  }
+}
+

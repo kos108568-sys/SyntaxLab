@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import type { Course, UserProfile, UserRole, Task } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -8,8 +8,32 @@ import {
   subscribeToClassroomRealtime,
   saveProgressToDb,
   updateSessionInDb,
-  sendTeacherHintToDb
+  sendTeacherHintToDb,
+  loadGroupCourseAccess,
+  toggleGroupCourseAccess
 } from '../services/supabaseService';
+
+export interface CourseMeta {
+  id: string;
+  title: string;
+  description: string;
+  badge: string;
+}
+
+export const ALL_COURSES: CourseMeta[] = [
+  {
+    id: 'csharp-foundations',
+    title: 'C# Pro (.NET 8)',
+    description: 'Академический курс: синтаксис, типы данных, ООП, коллекции и LINQ',
+    badge: 'C# 12'
+  },
+  {
+    id: 'git-branching',
+    title: 'Git Branching Lab',
+    description: 'Интерактивный тренажер по ветвлению, слиянию, rebase и cherry-pick',
+    badge: 'Git DAG'
+  }
+];
 
 export interface ClassroomStudentState {
   id: string;
@@ -41,6 +65,14 @@ interface AppContextType {
   studentsInClass: ClassroomStudentState[];
   selectedStudentId: string;
   setSelectedStudentId: (id: string) => void;
+
+  // Course Access & Switching
+  activeCourseId: string;
+  setActiveCourseId: (id: string) => void;
+  availableCourses: CourseMeta[];
+  groupCourseAccess: Record<string, string[]>;
+  toggleCourseForGroup: (groupName: string, courseId: string, enabled: boolean) => Promise<void>;
+  userAllowedCourses: CourseMeta[];
   
   // Progress
   completedTaskIds: string[];
@@ -73,6 +105,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [role, setRole] = useState<UserRole>('student');
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
+  // Active course and group access state
+  const [activeCourseId, setActiveCourseId] = useState<string>('csharp-foundations');
+  const [groupCourseAccess, setGroupCourseAccess] = useState<Record<string, string[]>>({
+    'ИТ-301': ['csharp-foundations', 'git-branching'],
+    'ИТ-302': ['csharp-foundations'],
+    'ПИ-201': ['csharp-foundations', 'git-branching']
+  });
+
   const [course, setCourse] = useState<Course | null>(null);
   const [studentsInClass, setStudentsInClass] = useState<ClassroomStudentState[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -80,6 +120,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [broadcastMessage, setBroadcastMessage] = useState<string | null>(null);
 
   const TEACHER_GITHUB_LOGINS = ['kos108568-sys', 'kos108568'];
+
+  // Toggle course access per group
+  const toggleCourseForGroup = async (groupName: string, courseId: string, enabled: boolean) => {
+    setGroupCourseAccess(prev => {
+      const current = prev[groupName] || [];
+      const updated = enabled 
+        ? (current.includes(courseId) ? current : [...current, courseId])
+        : current.filter(id => id !== courseId);
+      return { ...prev, [groupName]: updated };
+    });
+    await toggleGroupCourseAccess(groupName, courseId, enabled);
+  };
+
+  // Determine allowed courses for current user
+  const userAllowedCourses = useMemo(() => {
+    if (role === 'teacher' || currentUser?.role === 'teacher') {
+      return ALL_COURSES;
+    }
+    const studentGroup = currentUser?.groupName || '';
+    const allowedIds = groupCourseAccess[studentGroup] || [];
+    return ALL_COURSES.filter(c => allowedIds.includes(c.id));
+  }, [role, currentUser, groupCourseAccess]);
+
+  // Auto-switch to an allowed course if current activeCourseId is not permitted for the student
+  useEffect(() => {
+    if (userAllowedCourses.length > 0 && !userAllowedCourses.some(c => c.id === activeCourseId)) {
+      setActiveCourseId(userAllowedCourses[0].id);
+    }
+  }, [userAllowedCourses, activeCourseId]);
 
   // 1. Загрузка профиля пользователя из Supabase
   const syncUserProfile = async (user: User) => {
@@ -203,6 +272,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (progressData) {
           setCompletedTaskIds(progressData.map(p => p.task_id));
         }
+      }
+
+      // Загрузка прав доступа групп к курсам
+      const groupAccess = await loadGroupCourseAccess();
+      if (groupAccess && Object.keys(groupAccess).length > 0) {
+        setGroupCourseAccess(groupAccess);
       }
     } catch (err) {
       console.error('Error loading data from Supabase:', err);
@@ -328,6 +403,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         studentsInClass,
         selectedStudentId,
         setSelectedStudentId,
+        activeCourseId,
+        setActiveCourseId,
+        availableCourses: ALL_COURSES,
+        groupCourseAccess,
+        toggleCourseForGroup,
+        userAllowedCourses,
         completedTaskIds,
         completeTask,
         requestTeacherHelp,
