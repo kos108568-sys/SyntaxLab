@@ -19,7 +19,7 @@ const MainLayout: React.FC = () => {
     isLoadingAuth 
   } = useApp();
 
-  if (isLoadingAuth) {
+  if (isLoadingAuth || (session && !currentUser)) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
         <div className="w-10 h-10 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 animate-pulse">
@@ -31,7 +31,7 @@ const MainLayout: React.FC = () => {
   }
 
   // If not authenticated via GitHub -> Show Login Screen
-  if (!session || !currentUser) {
+  if (!session) {
     return <AuthScreen />;
   }
 

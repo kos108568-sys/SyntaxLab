@@ -286,31 +286,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // 3. Отслеживание авторизации Supabase (GitHub OAuth)
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        syncUserProfile(session.user).then(() => {
-          reloadFromDb();
-        });
+    let isMounted = true;
+
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!isMounted) return;
+        setSession(session);
+        if (session?.user) {
+          await syncUserProfile(session.user);
+          await reloadFromDb();
+        }
+      } catch (err) {
+        console.error('Error initializing auth:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingAuth(false);
+        }
       }
-      setIsLoadingAuth(false);
-    });
+    };
+
+    initAuth();
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session?.user) {
-        syncUserProfile(session.user).then(() => {
-          reloadFromDb();
-        });
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (!isMounted) return;
+      if (event === 'INITIAL_SESSION') return;
+
+      setSession(newSession);
+      if (newSession?.user) {
+        setIsLoadingAuth(true);
+        await syncUserProfile(newSession.user);
+        await reloadFromDb();
+        if (isMounted) setIsLoadingAuth(false);
       } else {
         setCurrentUser(null);
+        if (isMounted) setIsLoadingAuth(false);
       }
-      setIsLoadingAuth(false);
     });
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, []);
