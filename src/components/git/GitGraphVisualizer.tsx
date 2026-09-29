@@ -21,8 +21,12 @@ const BRANCH_COLORS: Record<string, { bg: string; text: string; border: string; 
   bugFix: { bg: 'bg-amber-600', text: 'text-amber-200', border: 'border-amber-400', glow: 'shadow-amber-500/40' },
   feature: { bg: 'bg-emerald-600', text: 'text-emerald-200', border: 'border-emerald-400', glow: 'shadow-emerald-500/40' },
   side: { bg: 'bg-cyan-600', text: 'text-cyan-200', border: 'border-cyan-400', glow: 'shadow-cyan-500/40' },
+  another: { bg: 'bg-teal-600', text: 'text-teal-200', border: 'border-teal-400', glow: 'shadow-teal-500/40' },
+  caption: { bg: 'bg-fuchsia-600', text: 'text-fuchsia-200', border: 'border-fuchsia-400', glow: 'shadow-fuchsia-500/40' },
   local: { bg: 'bg-rose-600', text: 'text-rose-200', border: 'border-rose-400', glow: 'shadow-rose-500/40' },
-  pushed: { bg: 'bg-purple-600', text: 'text-purple-200', border: 'border-purple-400', glow: 'shadow-purple-500/40' }
+  pushed: { bg: 'bg-purple-600', text: 'text-purple-200', border: 'border-purple-400', glow: 'shadow-purple-500/40' },
+  'o/main': { bg: 'bg-orange-600', text: 'text-orange-200', border: 'border-orange-400', glow: 'shadow-orange-500/40' },
+  'origin/main': { bg: 'bg-orange-600', text: 'text-orange-200', border: 'border-orange-400', glow: 'shadow-orange-500/40' }
 };
 
 function getBranchColor(branchName: string) {
@@ -40,7 +44,7 @@ export const GitGraphVisualizer: React.FC<GitGraphVisualizerProps> = ({
   className = '',
   title
 }) => {
-  const { nodes, edges, branchPlacements, width, height } = useMemo(() => {
+  const { nodes, edges, branchPlacements, tagPlacements, width, height } = useMemo(() => {
     const commits = state.commits;
     const commitKeys = Object.keys(commits);
 
@@ -136,11 +140,19 @@ export const GitGraphVisualizer: React.FC<GitGraphVisualizerProps> = ({
       }
     }
 
-    // 3. Map branches to commits
+    // 3. Map branches and tags to commits
     const branchMap: Record<string, string[]> = {};
     for (const [branch, commitId] of Object.entries(state.branches)) {
       if (!branchMap[commitId]) branchMap[commitId] = [];
       branchMap[commitId].push(branch);
+    }
+
+    const tagMap: Record<string, string[]> = {};
+    if (state.tags) {
+      for (const [tag, commitId] of Object.entries(state.tags)) {
+        if (!tagMap[commitId]) tagMap[commitId] = [];
+        tagMap[commitId].push(tag);
+      }
     }
 
     const calculatedWidth = Math.max(isMini ? 260 : 500, startX + (maxDepth + 1) * stepX + 60);
@@ -150,6 +162,7 @@ export const GitGraphVisualizer: React.FC<GitGraphVisualizerProps> = ({
       nodes: Object.values(nodeCoords),
       edges: edgeList,
       branchPlacements: branchMap,
+      tagPlacements: tagMap,
       width: calculatedWidth,
       height: calculatedHeight
     };
@@ -319,9 +332,39 @@ export const GitGraphVisualizer: React.FC<GitGraphVisualizerProps> = ({
                   );
                 })}
 
+                {/* Tag badges */}
+                {(tagPlacements[node.id] || []).map((tag, tIdx) => {
+                  const offsetY = -((branchesOnNode.length + tIdx) * (isMini ? 16 : 24));
+                  return (
+                    <g key={tag} transform={`translate(0, ${offsetY})`}>
+                      <rect
+                        x={isMini ? -20 : -28}
+                        y={isMini ? -12 : -18}
+                        width={isMini ? 40 : 56}
+                        height={isMini ? 14 : 20}
+                        rx={isMini ? 3 : 5}
+                        fill="#d97706"
+                        stroke="#fde68a"
+                        strokeWidth="1"
+                      />
+                      <text
+                        x={0}
+                        y={isMini ? -2 : -4}
+                        textAnchor="middle"
+                        fill="#ffffff"
+                        fontSize={isMini ? '8px' : '10px'}
+                        fontWeight="700"
+                        fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+                      >
+                        🏷️ {tag}
+                      </text>
+                    </g>
+                  );
+                })}
+
                 {/* Detached HEAD badge */}
                 {isHeadDirect && (
-                  <g transform={`translate(0, -${branchesOnNode.length * (isMini ? 16 : 24)})`}>
+                  <g transform={`translate(0, -${(branchesOnNode.length + (tagPlacements[node.id] || []).length) * (isMini ? 16 : 24)})`}>
                     <rect
                       x={isMini ? -22 : -30}
                       y={isMini ? -12 : -18}

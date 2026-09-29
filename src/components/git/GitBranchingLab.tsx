@@ -20,7 +20,9 @@ import {
   Grid, 
   SlidersHorizontal,
   X,
-  Play
+  Play,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 export const GitBranchingLab: React.FC = () => {
@@ -34,6 +36,7 @@ export const GitBranchingLab: React.FC = () => {
   const [showGoalModal, setShowGoalModal] = useState<boolean>(false);
   const [showTutorialModal, setShowTutorialModal] = useState<boolean>(true);
   const [showLevelSelect, setShowLevelSelect] = useState<boolean>(false);
+  const [selectedSequenceFilter, setSelectedSequenceFilter] = useState<string>('all');
   const [levelCompleted, setLevelCompleted] = useState<boolean>(false);
   const [completedLevels, setCompletedLevels] = useState<string[]>([]);
 
@@ -203,25 +206,53 @@ export const GitBranchingLab: React.FC = () => {
     <div className="space-y-5">
       {/* Top Header & Navigation Bar */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 text-amber-400 border border-amber-500/30">
-              <GitBranch className="w-5 h-5 animate-pulse" />
-            </span>
-            <h1 className="text-xl font-bold text-white tracking-tight">
-              {isSandbox ? 'Git Песочница (Свободный режим)' : `Уровень ${currentLevel.number}: ${currentLevel.title}`}
-            </h1>
-            {!isSandbox && (
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                +{currentLevel.xp} XP
+        <div className="flex items-center gap-3">
+          {!isSandbox && (
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shadow-inner">
+              <button
+                type="button"
+                disabled={currentLevelIndex <= 0}
+                onClick={() => startLevel(currentLevelIndex - 1)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+                title="Предыдущий уровень"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="font-mono text-xs px-2 font-bold text-indigo-400">
+                {currentLevel.sequenceIndex}
               </span>
-            )}
+              <button
+                type="button"
+                disabled={currentLevelIndex >= GIT_LEVELS.length - 1}
+                onClick={() => startLevel(currentLevelIndex + 1)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+                title="Следующий уровень"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 text-amber-400 border border-amber-500/30">
+                <GitBranch className="w-5 h-5 animate-pulse" />
+              </span>
+              <h1 className="text-xl font-bold text-white tracking-tight">
+                {isSandbox ? 'Git Песочница (Свободный режим)' : `${currentLevel.sequenceIndex}: ${currentLevel.title}`}
+              </h1>
+              {!isSandbox && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  +{currentLevel.xp} XP
+                </span>
+              )}
+            </div>
+            <p className="text-xs sm:text-sm text-slate-400 mt-1">
+              {isSandbox 
+                ? 'Свободная среда для экспериментов с ветками, слияниями и перебазированием.' 
+                : `${currentLevel.sequenceTitle} — ${currentLevel.description}`}
+            </p>
           </div>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            {isSandbox 
-              ? 'Свободная среда для экспериментов с ветками, слияниями и перебазированием.' 
-              : currentLevel.description}
-          </p>
         </div>
 
         {/* Action Controls */}
@@ -346,10 +377,10 @@ export const GitBranchingLab: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-xs font-bold text-indigo-400 font-mono uppercase tracking-wider">
-                    Уровень {currentLevel.number} из {GIT_LEVELS.length}
+                    {currentLevel.sequenceTitle} • Уровень {currentLevel.sequenceIndex}
                   </span>
                   <h2 className="text-lg font-bold text-white tracking-tight">
-                    {currentLevel.dialogue.title}
+                    {currentLevel.title}
                   </h2>
                 </div>
               </div>
@@ -451,11 +482,14 @@ export const GitBranchingLab: React.FC = () => {
       {/* MODAL 3: Level Selector Menu */}
       {showLevelSelect && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-5 text-slate-100 max-h-[85vh] flex flex-col">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-4 text-slate-100 max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
                 <Grid className="w-5 h-5 text-indigo-400" />
-                <h2 className="text-base font-bold text-white tracking-tight">Каталог уровней Git Branching</h2>
+                <div>
+                  <h2 className="text-base font-bold text-white tracking-tight">Каталог уровней Git Branching</h2>
+                  <p className="text-[11px] text-slate-400">23 интерактивных упражнения из оригинального Learn Git Branching</p>
+                </div>
               </div>
               <button
                 type="button"
@@ -466,69 +500,106 @@ export const GitBranchingLab: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-              {GIT_LEVELS.map((lvl, idx) => {
-                const isCurrent = !isSandbox && currentLevelIndex === idx;
-                const isDone = completedLevels.includes(lvl.id);
+            {/* Sequence Filter Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+              {[
+                { id: 'all', label: 'Все (23)' },
+                { id: 'intro', label: '1. Введение' },
+                { id: 'rampup', label: '2. Обороты' },
+                { id: 'move', label: '3. Перемещение' },
+                { id: 'mixed', label: '4. Солянка' },
+                { id: 'advanced', label: '5. Продвинутые' },
+                { id: 'remote', label: '6. Удаленные' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSelectedSequenceFilter(tab.id)}
+                  className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium transition-all text-xs cursor-pointer ${
+                    selectedSequenceFilter === tab.id
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                      : 'bg-slate-950/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
 
-                return (
-                  <div
-                    key={lvl.id}
-                    onClick={() => { startLevel(idx); setShowLevelSelect(false); }}
-                    className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
-                      isCurrent
-                        ? 'bg-indigo-600/10 border-indigo-500/40 text-white'
-                        : isDone
-                        ? 'bg-slate-950/60 border-emerald-500/30 hover:border-emerald-500/50'
-                        : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-950'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs font-mono ${
-                        isDone 
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                          : isCurrent 
-                          ? 'bg-indigo-600 text-white' 
-                          : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {isDone ? '✓' : lvl.number}
-                      </div>
+            {/* Level Cards List */}
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+              {GIT_LEVELS
+                .filter(lvl => selectedSequenceFilter === 'all' || lvl.sequenceId === selectedSequenceFilter)
+                .map((lvl) => {
+                  const originalIdx = GIT_LEVELS.findIndex(l => l.id === lvl.id);
+                  const isCurrent = !isSandbox && currentLevelIndex === originalIdx;
+                  const isDone = completedLevels.includes(lvl.id);
 
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-xs font-bold text-slate-200">{lvl.title}</h4>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
-                            {lvl.category}
-                          </span>
+                  return (
+                    <div
+                      key={lvl.id}
+                      onClick={() => { startLevel(originalIdx); setShowLevelSelect(false); }}
+                      className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                        isCurrent
+                          ? 'bg-indigo-600/10 border-indigo-500/40 text-white shadow-sm'
+                          : isDone
+                          ? 'bg-slate-950/60 border-emerald-500/30 hover:border-emerald-500/50'
+                          : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-950'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs font-mono shrink-0 ${
+                          isDone 
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                            : isCurrent 
+                            ? 'bg-indigo-600 text-white' 
+                            : 'bg-slate-800 text-slate-400'
+                        }`}>
+                          {isDone ? '✓' : lvl.sequenceIndex}
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">{lvl.description}</p>
+
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-slate-200">{lvl.title}</h4>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/50">
+                              {lvl.sequenceTitle}
+                            </span>
+                            <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono ${
+                              lvl.difficulty === 'easy' ? 'text-emerald-400 bg-emerald-950/40' :
+                              lvl.difficulty === 'medium' ? 'text-amber-400 bg-amber-950/40' :
+                              'text-red-400 bg-red-950/40'
+                            }`}>
+                              {lvl.difficulty}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">{lvl.description}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-xs font-mono text-amber-400 font-semibold">+{lvl.xp} XP</span>
+                        <Play className="w-3.5 h-3.5 text-slate-500 hover:text-white" />
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-mono text-amber-400 font-semibold">+{lvl.xp} XP</span>
-                      <Play className="w-3.5 h-3.5 text-slate-500 hover:text-white" />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
 
               {/* Sandbox card */}
               <div
                 onClick={() => { startSandbox(); setShowLevelSelect(false); }}
-                className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
                   isSandbox
                     ? 'bg-emerald-600/10 border-emerald-500/40 text-white'
                     : 'bg-slate-950/60 border-slate-800/80 hover:border-emerald-500/30'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
                     <SlidersHorizontal className="w-4 h-4" />
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-slate-200">Свободная Песочница (Sandbox)</h4>
-                    <p className="text-[11px] text-slate-400">Без заданий и целей — свободная отработка любых git команд</p>
+                    <p className="text-[11px] text-slate-400">Без заданий и ограничений — свободная отработка любых git команд</p>
                   </div>
                 </div>
                 <Play className="w-3.5 h-3.5 text-emerald-400" />

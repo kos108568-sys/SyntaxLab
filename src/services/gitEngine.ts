@@ -13,6 +13,7 @@ export interface GitHead {
 export interface GitState {
   commits: Record<string, GitCommit>;
   branches: Record<string, string>; // branchName -> commitId
+  tags?: Record<string, string>;     // tagName -> commitId
   head: GitHead;
   commitCounter: number;
 }
@@ -21,7 +22,7 @@ export interface GitExecutionResult {
   nextState: GitState;
   output: string;
   isError: boolean;
-  commandType?: 'commit' | 'branch' | 'checkout' | 'merge' | 'rebase' | 'reset' | 'revert' | 'cherry-pick' | 'other';
+  commandType?: 'commit' | 'branch' | 'checkout' | 'merge' | 'rebase' | 'reset' | 'revert' | 'cherry-pick' | 'tag' | 'remote' | 'other';
 }
 
 /**
@@ -35,6 +36,7 @@ export function createInitialGitState(): GitState {
     branches: {
       main: 'C0'
     },
+    tags: {},
     head: {
       type: 'branch',
       name: 'main'
@@ -50,6 +52,7 @@ export function cloneGitState(state: GitState): GitState {
   return {
     commits: { ...state.commits },
     branches: { ...state.branches },
+    tags: { ...(state.tags || {}) },
     head: { ...state.head },
     commitCounter: state.commitCounter
   };
@@ -112,6 +115,58 @@ export function findCommonAncestor(commits: Record<string, GitCommit>, aId: stri
 }
 
 /**
+ * Resolves relative references like HEAD~1, HEAD^, HEAD^2, branch name, tag or commit id.
+ */
+export function resolveRef(state: GitState, ref: string): string | null {
+  if (!ref) return null;
+
+  // Direct commit ID
+  if (state.commits[ref]) return ref;
+
+  // Branch
+  if (state.branches[ref]) return state.branches[ref];
+
+  // Tag
+  if (state.tags && state.tags[ref]) return state.tags[ref];
+
+  // HEAD
+  let current = getHeadCommitId(state);
+  if (ref === 'HEAD') return current;
+
+  // Multiple parent operator like HEAD^2 or ref^2 (second parent of merge)
+  if (ref.includes('^2')) {
+    const [base] = ref.split('^2');
+    const currId = base === 'HEAD' ? getHeadCommitId(state) : (state.branches[base] || (state.tags && state.tags[base]) || base);
+    const commit = state.commits[currId];
+    return commit && commit.parentIds.length > 1 ? commit.parentIds[1] : null;
+  }
+
+  // HEAD~N or ref~N
+  if (ref.includes('~')) {
+    const [base, offsetStr] = ref.split('~');
+    const offset = parseInt(offsetStr, 10) || 1;
+    let currId = base === 'HEAD' ? getHeadCommitId(state) : (state.branches[base] || (state.tags && state.tags[base]) || base);
+
+    for (let i = 0; i < offset; i++) {
+      const commit = state.commits[currId];
+      if (!commit || commit.parentIds.length === 0) return null;
+      currId = commit.parentIds[0];
+    }
+    return currId;
+  }
+
+  // HEAD^ or ref^
+  if (ref.endsWith('^')) {
+    const base = ref.slice(0, -1);
+    const currId = base === 'HEAD' ? getHeadCommitId(state) : (state.branches[base] || (state.tags && state.tags[base]) || base);
+    const commit = state.commits[currId];
+    return commit && commit.parentIds.length > 0 ? commit.parentIds[0] : null;
+  }
+
+  return null;
+}
+
+/**
  * Executes a Git command string against a GitState.
  */
 export function executeGitCommand(
@@ -131,21 +186,28 @@ export function executeGitCommand(
       return {
         nextState: currentState,
         output: [
-          'Поддерживаемые команды Git:',
-          '  git commit [-m "сообщение"]  - создать новый коммит',
-          '  git branch <имя_ветки>       - создать ветку',
-          '  git branch -d <имя_ветки>    - удалить ветку',
-          '  git checkout <ветка|коммит>  - переключиться на ветку/коммит (или git switch)',
-          '  git checkout -b <ветка>      - создать ветку и переключиться (или git switch -c)',
-          '  git merge <ветка>            - слить указанную ветку в текущую',
+          'Поддерживаемые команды Git (Learn Git Branching):',
+          '  git commit [-m "msg"]        - создать коммит',
+          '  git branch <имя>             - создать ветку',
+          '  git branch -f <ветка> <цель> - принудительно переместить ветку на коммит',
+          '  git branch -d <ветка>        - удалить ветку',
+          '  git checkout <ветка|коммит>  - переключиться (или git switch)',
+          '  git checkout -b <ветка>      - создать и переключиться (или git switch -c)',
+          '  git merge <ветка>            - слить ветку в текущую',
           '  git rebase <ветка>           - перебазировать текущую ветку поверх указанной',
-          '  git cherry-pick <коммит...>  - скопировать коммиты в текущую ветку',
+          '  git cherry-pick <C1> <C2>... - скопировать коммиты в текущую ветку',
           '  git reset [HEAD~1 | коммит]  - переместить указатель ветки назад',
           '  git revert <коммит>          - создать компенсирующий коммит',
-          '  git log                      - просмотр истории коммитов',
+          '  git tag <имя> [коммит]       - создать фиксированный тег версии',
+          '  git describe [коммит]        - показать ближайший тег и расстояние',
+          '  git clone                    - клонировать удаленный репозиторий',
+          '  git fakeTeamwork [кол-во]    - сымитировать коммиты от коллег на remote',
+          '  git fetch                    - скачать коммиты из удаленного репозитория',
+          '  git pull [--rebase]          - скачать и объединить с локальной веткой',
+          '  git push                     - отправить коммиты в удаленный репозиторий',
           '  undo                         - отменить последнюю выполненную команду',
           '  reset                        - сбросить уровень к начальному состоянию',
-          '  clear                        - очистить терминал'
+          '  clear                        - очистить экран терминала'
         ].join('\n'),
         isError: false,
         commandType: 'other'
@@ -154,7 +216,7 @@ export function executeGitCommand(
 
     return {
       nextState: currentState,
-      output: `Команда "${mainCmd}" не распознана. Используйте команды, начинающиеся с "git", или введите "help".`,
+      output: `Команда "${mainCmd}" не распознана. Введите команду Git или "help".`,
       isError: true
     };
   }
@@ -162,6 +224,7 @@ export function executeGitCommand(
   const subCmd = (parts[1] || '').toLowerCase();
   const args = parts.slice(2);
   const state = cloneGitState(currentState);
+  if (!state.tags) state.tags = {};
 
   // 1. git commit
   if (subCmd === 'commit') {
@@ -198,7 +261,6 @@ export function executeGitCommand(
   // 2. git branch
   if (subCmd === 'branch') {
     if (args.length === 0) {
-      // List branches
       const branchLines = Object.keys(state.branches).map(b => {
         const isCurrent = state.head.type === 'branch' && state.head.name === b;
         return `${isCurrent ? '* ' : '  '}${b} -> ${state.branches[b]}`;
@@ -211,6 +273,23 @@ export function executeGitCommand(
       };
     }
 
+    // Force move branch: git branch -f <branch> <target>
+    if (args[0] === '-f') {
+      const branchToMove = args[1];
+      const target = args[2] ? resolveRef(state, args[2]) : getHeadCommitId(state);
+      if (!branchToMove || !target || !state.commits[target]) {
+        return { nextState: state, output: 'Ошибка: использование: git branch -f <ветка> <коммит>', isError: true };
+      }
+      state.branches[branchToMove] = target;
+      return {
+        nextState: state,
+        output: `Ветка "${branchToMove}" принудительно перемещена на ${target}.`,
+        isError: false,
+        commandType: 'branch'
+      };
+    }
+
+    // Delete branch: git branch -d <branch>
     if (args[0] === '-d' || args[0] === '-D') {
       const branchToDelete = args[1];
       if (!branchToDelete) {
@@ -255,7 +334,7 @@ export function executeGitCommand(
       return { nextState: state, output: 'Ошибка: укажите ветку или коммит: git checkout <имя>', isError: true };
     }
 
-    // git checkout -b <branch> or git switch -c <branch>
+    // git checkout -b <branch> [target]
     if (args[0] === '-b' || args[0] === '-c') {
       const newBranchName = args[1];
       if (!newBranchName) {
@@ -280,7 +359,6 @@ export function executeGitCommand(
     const resolved = resolveRef(state, ref);
 
     if (state.branches[ref]) {
-      // Switching to a branch
       state.head = { type: 'branch', name: ref };
       return {
         nextState: state,
@@ -291,11 +369,10 @@ export function executeGitCommand(
     }
 
     if (resolved && state.commits[resolved]) {
-      // Detaching HEAD onto commit
       state.head = { type: 'commit', name: resolved };
       return {
         nextState: state,
-        output: `Примечание: переключение на '${resolved}'. Вы находитесь в состоянии «detached HEAD» (отсоединенный HEAD).`,
+        output: `Переключение на '${resolved}'. Вы находитесь в состоянии «detached HEAD» (отсоединенный HEAD).`,
         isError: false,
         commandType: 'checkout'
       };
@@ -303,7 +380,7 @@ export function executeGitCommand(
 
     return {
       nextState: state,
-      output: `Ошибка: путь/ветка '${ref}' не соответствует ни одной ветке или коммиту.`,
+      output: `Ошибка: ссылка '${ref}' не соответствует ни одной ветке, тегу или коммиту.`,
       isError: true
     };
   }
@@ -326,7 +403,6 @@ export function executeGitCommand(
       return { nextState: state, output: 'Уже актуально (Already up to date).', isError: false };
     }
 
-    // Fast-forward check: is currentCommitId an ancestor of targetCommitId?
     const ancestorsTarget = getAncestors(state.commits, targetCommitId);
     if (ancestorsTarget.has(currentCommitId)) {
       if (state.head.type === 'branch') {
@@ -342,7 +418,6 @@ export function executeGitCommand(
       };
     }
 
-    // Create merge commit with 2 parents: [current, target]
     state.commitCounter += 1;
     const mergeCommitId = `C${state.commitCounter}`;
     state.commits[mergeCommitId] = {
@@ -371,7 +446,9 @@ export function executeGitCommand(
       return { nextState: state, output: 'Ошибка: укажите целевую ветку для rebase: git rebase <ветка>', isError: true };
     }
 
-    const targetRef = args[0];
+    // Interactive rebase simulation: git rebase -i HEAD~N
+    const isInteractive = args[0] === '-i';
+    const targetRef = isInteractive ? args[1] : args[0];
     const targetCommitId = resolveRef(state, targetRef);
     const currentCommitId = getHeadCommitId(state);
 
@@ -383,7 +460,6 @@ export function executeGitCommand(
       return { nextState: state, output: 'Текущая ветка уже находится на вершине целевого коммита.', isError: false };
     }
 
-    // Collect commits on current branch back to common ancestor
     const commonAncestor = findCommonAncestor(state.commits, currentCommitId, targetCommitId);
     const commitsToReplay: string[] = [];
     let curr = currentCommitId;
@@ -395,7 +471,6 @@ export function executeGitCommand(
     }
 
     if (commitsToReplay.length === 0) {
-      // Already ancestor, fast-forward current branch to target
       if (state.head.type === 'branch') {
         state.branches[state.head.name] = targetCommitId;
       } else {
@@ -409,7 +484,6 @@ export function executeGitCommand(
       };
     }
 
-    // Replay commits on top of targetCommitId
     let newParentId = targetCommitId;
     for (const oldCommitId of commitsToReplay) {
       state.commitCounter += 1;
@@ -430,7 +504,9 @@ export function executeGitCommand(
 
     return {
       nextState: state,
-      output: `Успешно перебазировано ${commitsToReplay.length} коммитов поверх ${targetCommitId}. Новая вершина: ${newParentId}`,
+      output: isInteractive 
+        ? `[Интерактивный Rebase] История переупорядочена и воспроизведена. Новая вершина: ${newParentId}`
+        : `Успешно перебазировано ${commitsToReplay.length} коммитов поверх ${targetCommitId}. Новая вершина: ${newParentId}`,
       isError: false,
       commandType: 'rebase'
     };
@@ -506,11 +582,7 @@ export function executeGitCommand(
 
   // 8. git revert
   if (subCmd === 'revert') {
-    if (args.length === 0) {
-      return { nextState: state, output: 'Ошибка: укажите коммит для отмены: git revert <коммит>', isError: true };
-    }
-
-    const targetRef = args[0];
+    const targetRef = args[0] || 'HEAD';
     const targetId = resolveRef(state, targetRef);
     if (!targetId || !state.commits[targetId]) {
       return { nextState: state, output: `Ошибка: коммит "${targetRef}" не найден.`, isError: true };
@@ -540,7 +612,184 @@ export function executeGitCommand(
     };
   }
 
-  // 9. git log
+  // 9. git tag
+  if (subCmd === 'tag') {
+    if (args.length === 0) {
+      const tagLines = Object.keys(state.tags).map(t => `${t} -> ${state.tags![t]}`);
+      return {
+        nextState: state,
+        output: tagLines.length > 0 ? tagLines.join('\n') : 'Теги отсутствуют.',
+        isError: false,
+        commandType: 'tag'
+      };
+    }
+
+    if (args[0] === '-d') {
+      const tagToDelete = args[1];
+      if (!tagToDelete || !state.tags[tagToDelete]) {
+        return { nextState: state, output: `Ошибка: тег "${tagToDelete}" не найден.`, isError: true };
+      }
+      delete state.tags[tagToDelete];
+      return {
+        nextState: state,
+        output: `Тег "${tagToDelete}" удален.`,
+        isError: false,
+        commandType: 'tag'
+      };
+    }
+
+    const tagName = args[0];
+    const targetCommit = args[1] ? resolveRef(state, args[1]) : getHeadCommitId(state);
+
+    if (!targetCommit || !state.commits[targetCommit]) {
+      return { nextState: state, output: `Ошибка: коммит "${args[1]}" не существует.`, isError: true };
+    }
+
+    state.tags[tagName] = targetCommit;
+    return {
+      nextState: state,
+      output: `Создан постоянный тег "${tagName}" на коммите ${targetCommit}.`,
+      isError: false,
+      commandType: 'tag'
+    };
+  }
+
+  // 10. git describe
+  if (subCmd === 'describe') {
+    const targetRef = args[0] || 'HEAD';
+    const targetCommit = resolveRef(state, targetRef);
+    if (!targetCommit || !state.commits[targetCommit]) {
+      return { nextState: state, output: `Ошибка: коммит "${targetRef}" не найден.`, isError: true };
+    }
+
+    const tagEntries = Object.entries(state.tags || {});
+    if (tagEntries.length === 0) {
+      return { nextState: state, output: `fatal: No tags can describe '${targetRef}'.`, isError: true };
+    }
+
+    // Find closest tag ancestor
+    let closestTag = tagEntries[0][0];
+    let minDistance = 0;
+
+    for (const [tag, tagCommit] of tagEntries) {
+      if (tagCommit === targetCommit) {
+        return {
+          nextState: state,
+          output: tag,
+          isError: false,
+          commandType: 'other'
+        };
+      }
+      const ancestors = getAncestors(state.commits, targetCommit);
+      if (ancestors.has(tagCommit)) {
+        closestTag = tag;
+        minDistance = 1; // Simplified distance for visualizer
+      }
+    }
+
+    return {
+      nextState: state,
+      output: `${closestTag}_${minDistance}_g${targetCommit}`,
+      isError: false,
+      commandType: 'other'
+    };
+  }
+
+  // 11. git clone
+  if (subCmd === 'clone') {
+    const curHeadCommit = getHeadCommitId(state);
+    state.branches['o/main'] = curHeadCommit;
+    return {
+      nextState: state,
+      output: `Клонирование в 'repo'...\nУдаленная ветка 'o/main' настроена на ${curHeadCommit}.`,
+      isError: false,
+      commandType: 'remote'
+    };
+  }
+
+  // 12. git fakeTeamwork
+  if (subCmd === 'faketeamwork') {
+    const count = parseInt(args[0], 10) || 1;
+    const remoteBranch = 'o/main';
+    let currentRemoteTip = state.branches[remoteBranch] || getHeadCommitId(state);
+
+    const created: string[] = [];
+    for (let i = 0; i < count; i++) {
+      state.commitCounter += 1;
+      const fakeId = `C${state.commitCounter}`;
+      state.commits[fakeId] = {
+        id: fakeId,
+        parentIds: [currentRemoteTip],
+        message: `Remote coworker commit ${fakeId}`
+      };
+      currentRemoteTip = fakeId;
+      created.push(fakeId);
+    }
+    state.branches[remoteBranch] = currentRemoteTip;
+
+    return {
+      nextState: state,
+      output: `[Имитация командной работы] Коллеги запушили ${count} коммит(ов) в ${remoteBranch}: ${created.join(', ')}`,
+      isError: false,
+      commandType: 'remote'
+    };
+  }
+
+  // 13. git fetch
+  if (subCmd === 'fetch') {
+    return {
+      nextState: state,
+      output: `Все удаленные ссылки и ветки (o/main) успешно синхронизированы.`,
+      isError: false,
+      commandType: 'remote'
+    };
+  }
+
+  // 14. git pull
+  if (subCmd === 'pull') {
+    const isRebase = args.includes('--rebase');
+    const remoteBranch = 'o/main';
+    const remoteCommit = state.branches[remoteBranch] || state.branches['origin/main'];
+
+    if (!remoteCommit) {
+      return { nextState: state, output: 'Ошибка: удаленная ветка не настроена (выполните git clone).', isError: true };
+    }
+
+    if (isRebase) {
+      return executeGitCommand(state, `git rebase ${remoteBranch}`);
+    } else {
+      return executeGitCommand(state, `git merge ${remoteBranch}`);
+    }
+  }
+
+  // 15. git push
+  if (subCmd === 'push') {
+    const curCommit = getHeadCommitId(state);
+    const remoteBranch = 'o/main';
+    const remoteTip = state.branches[remoteBranch];
+
+    if (remoteTip) {
+      const ancestorsOfCurrent = getAncestors(state.commits, curCommit);
+      if (!ancestorsOfCurrent.has(remoteTip)) {
+        return {
+          nextState: state,
+          output: `error: failed to push some refs to 'origin'.\nПодсказка: История разошлась (diverged). Сначала подтяните изменения через 'git pull' или 'git fetch && git rebase o/main'.`,
+          isError: true,
+          commandType: 'remote'
+        };
+      }
+    }
+
+    state.branches[remoteBranch] = curCommit;
+    return {
+      nextState: state,
+      output: `Успешно отправлено в origin/${state.head.name}: ${curCommit}`,
+      isError: false,
+      commandType: 'remote'
+    };
+  }
+
+  // 16. git log
   if (subCmd === 'log') {
     const lines: string[] = [];
     let curr: string | null = getHeadCommitId(state);
@@ -569,48 +818,7 @@ export function executeGitCommand(
 }
 
 /**
- * Resolves relative references like HEAD~1, HEAD^, branch name or commit id.
- */
-function resolveRef(state: GitState, ref: string): string | null {
-  if (!ref) return null;
-
-  // Direct commit ID
-  if (state.commits[ref]) return ref;
-
-  // Branch
-  if (state.branches[ref]) return state.branches[ref];
-
-  // HEAD
-  let current = getHeadCommitId(state);
-  if (ref === 'HEAD') return current;
-
-  // HEAD~N or ref~N
-  if (ref.includes('~')) {
-    const [base, offsetStr] = ref.split('~');
-    const offset = parseInt(offsetStr, 10) || 1;
-    let currId = base === 'HEAD' ? getHeadCommitId(state) : (state.branches[base] || base);
-
-    for (let i = 0; i < offset; i++) {
-      const commit = state.commits[currId];
-      if (!commit || commit.parentIds.length === 0) return null;
-      currId = commit.parentIds[0];
-    }
-    return currId;
-  }
-
-  // HEAD^ or ref^
-  if (ref.endsWith('^')) {
-    const base = ref.slice(0, -1);
-    const currId = base === 'HEAD' ? getHeadCommitId(state) : (state.branches[base] || base);
-    const commit = state.commits[currId];
-    return commit && commit.parentIds.length > 0 ? commit.parentIds[0] : null;
-  }
-
-  return null;
-}
-
-/**
- * Checks if current Git state matches the goal Git state (topology, branch pointers, HEAD).
+ * Checks if current Git state matches the goal Git state (topology, branch pointers, HEAD, tags).
  */
 export function isGitGoalReached(current: GitState, goal: GitState): boolean {
   // 1. Check all goal branches exist in current
@@ -618,23 +826,30 @@ export function isGitGoalReached(current: GitState, goal: GitState): boolean {
     if (!current.branches[branchName]) return false;
   }
 
-  // 2. Check HEAD target match
+  // 2. Check tags if goal has them
+  if (goal.tags && Object.keys(goal.tags).length > 0) {
+    if (!current.tags) return false;
+    for (const tagName of Object.keys(goal.tags)) {
+      if (!current.tags[tagName]) return false;
+    }
+  }
+
+  // 3. Check HEAD target match
   if (goal.head.type !== current.head.type) return false;
   if (goal.head.type === 'branch' && goal.head.name !== current.head.name) return false;
 
-  // 3. Check commit count or graph structure
+  // 4. Check commit count or graph structure
   const currentCommitsCount = Object.keys(current.commits).length;
   const goalCommitsCount = Object.keys(goal.commits).length;
 
   if (currentCommitsCount !== goalCommitsCount) return false;
 
-  // 4. Verify branch tips match relative to commit parent structures
+  // 5. Verify branch tips match relative to commit parent structures
   for (const branch of Object.keys(goal.branches)) {
     const curTip = current.branches[branch];
     const goalTip = goal.branches[branch];
     if (!curTip || !goalTip) return false;
 
-    // Check parents count of the tip commit
     const curCommit = current.commits[curTip];
     const goalCommit = goal.commits[goalTip];
     if (!curCommit || !goalCommit) return false;
