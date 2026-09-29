@@ -299,19 +299,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const reloadFromDb = useCallback(async (explicitUserId?: string) => {
     if (!isSupabaseConfigured) return;
     try {
-      const activeUserId = explicitUserId || session?.user?.id;
+      let activeUserId = explicitUserId;
+      if (!activeUserId) {
+        const { data: sessData } = await supabase.auth.getSession();
+        activeUserId = sessData.session?.user?.id;
+      }
 
       // Параллельная загрузка всех данных для мгновенного отклика
       const [dbCourse, dbSessions, profRes, progressRes, groupAccess] = await Promise.all([
-        loadCourseFromSupabase('csharp-foundations'),
-        loadClassroomSessionsFromDb('ИТ-301'),
+        loadCourseFromSupabase('csharp-foundations').catch(err => {
+          console.warn('Error loading course:', err);
+          return null;
+        }),
+        loadClassroomSessionsFromDb('ИТ-301').catch(err => {
+          console.warn('Error loading sessions:', err);
+          return [];
+        }),
         activeUserId 
-          ? supabase.from('profiles').select('*').eq('id', activeUserId).maybeSingle()
+          ? supabase.from('profiles').select('*').eq('id', activeUserId).maybeSingle().catch(err => {
+              console.warn('Error loading profile:', err);
+              return { data: null, error: null };
+            })
           : Promise.resolve({ data: null, error: null }),
         activeUserId
-          ? supabase.from('student_progress').select('task_id').eq('user_id', activeUserId).eq('status', 'completed')
+          ? supabase.from('student_progress').select('task_id').eq('user_id', activeUserId).eq('status', 'completed').catch(err => {
+              console.warn('Error loading progress:', err);
+              return { data: null, error: null };
+            })
           : Promise.resolve({ data: null, error: null }),
-        loadGroupCourseAccess()
+        loadGroupCourseAccess().catch(err => {
+          console.warn('Error loading group access:', err);
+          return null;
+        })
       ]);
 
       if (dbCourse) {
@@ -325,12 +344,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Проверяем актуальный статус профиля
       if (profRes && 'data' in profRes && profRes.data) {
         const prof = profRes.data;
-        const githubMetadata = session?.user?.user_metadata || {};
+        const { data: currentSessData } = await supabase.auth.getSession();
+        const githubMetadata = currentSessData.session?.user?.user_metadata || {};
         const githubLogin = (githubMetadata.user_name || githubMetadata.preferred_username || '').toLowerCase();
         const isTeacher = TEACHER_GITHUB_LOGINS.includes(githubLogin);
         const updatedProfile: UserProfile = {
           id: prof.id,
-          email: prof.email || session?.user?.email || '',
+          email: prof.email || currentSessData.session?.user?.email || '',
           fullName: prof.full_name || githubMetadata.full_name || 'Студент',
           avatarUrl: prof.avatar_url || githubMetadata.avatar_url,
           role: isTeacher ? 'teacher' : ((prof.role as UserRole) || 'student'),
@@ -361,33 +381,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('Error loading data from Supabase:', err);
     }
-  }, [session]);
+  }, []);
 
   // 3. Отслеживание авторизации Supabase (GitHub OAuth)
   useEffect(() => {
     let isMounted = true;
+    let authDone = false;
+
+    const finishLoading = () => {
+      if (!authDone && isMounted) {
+        authDone = true;
+        setIsLoadingAuth(false);
+      }
+    };
+
+    // Гарантированный таймаут разблокировки экрана через 1.5 секунды
+    const safetyTimeout = setTimeout(() => {
+      finishLoading();
+    }, 1500);
 
     const handleAuth = async (currentSession: Session | null) => {
-      setSession(currentSession);
-      if (currentSession?.user) {
-        await syncUserProfile(currentSession.user);
-        await reloadFromDb(currentSession.user.id);
-      } else {
-        setCurrentUser(null);
-      }
-      if (isMounted) {
-        setIsLoadingAuth(false);
+      try {
+        setSession(currentSession);
+        if (currentSession?.user) {
+          await syncUserProfile(currentSession.user);
+          await reloadFromDb(currentSession.user.id);
+        } else {
+          setCurrentUser(null);
+        }
+      } catch (err) {
+        console.error('Error in handleAuth:', err);
+      } finally {
+        finishLoading();
       }
     };
 
     // Проверяем сессию при инициализации
     supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      if (!isMounted) return;
+      if (!isMounted || authDone) return;
       if (initialSession) {
         handleAuth(initialSession);
-      } else if (!hasStoredAuthToken()) {
-        setIsLoadingAuth(false);
+      } else {
+        finishLoading();
       }
+    }).catch(err => {
+      console.error('Error fetching session:', err);
+      finishLoading();
     });
 
     const {
@@ -398,8 +437,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (event === 'INITIAL_SESSION') {
         if (newSession) {
           await handleAuth(newSession);
-        } else if (!hasStoredAuthToken()) {
-          setIsLoadingAuth(false);
+        } else {
+          finishLoading();
         }
         return;
       }
@@ -416,16 +455,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           localStorage.removeItem('syntaxlab_cached_group_access');
           localStorage.removeItem('syntaxlab_active_course_id');
         } catch {}
-        if (isMounted) setIsLoadingAuth(false);
+        finishLoading();
       }
     });
-
-    // Страховочный таймаут (если сеть заблокирована или токен поврежден)
-    const safetyTimeout = setTimeout(() => {
-      if (isMounted) {
-        setIsLoadingAuth(false);
-      }
-    }, 2500);
 
     return () => {
       isMounted = false;
