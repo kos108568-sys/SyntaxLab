@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import type { Course, UserProfile, UserRole, Task, TelemetryEvent } from '../types';
+import type { Course, UserProfile, UserRole, Task, TelemetryEvent, ClassroomStudentState } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { initialCsharpCourse } from '../data/csharpCourse';
 import {
@@ -44,37 +44,7 @@ export const ALL_COURSES: CourseMeta[] = [
   }
 ];
 
-export interface ClassroomStudentState {
-  id: string;
-  fullName: string;
-  avatarUrl?: string;
-  email: string;
-  groupName: string;
-  currentTaskId: string;
-  currentTaskTitle: string;
-  currentLessonTitle: string;
-  status: 'active' | 'stuck' | 'completed_step' | 'idle';
-  attemptsOnCurrentTask: number;
-  timeOnCurrentTaskMinutes: number;
-  needsHelp: boolean;
-  helpMessage?: string;
-  totalXp: number;
-  streakDays: number;
-  lastActive: string;
-  teacherComment?: string;
-  // Полная телеметрия и античит прокторинг
-  tabSwitchCount: number;
-  totalAwaySeconds: number;
-  pasteCount: number;
-  pastedCharsTotal: number;
-  isCurrentlyAway: boolean;
-  totalErrorsCount: number;
-  totalAttemptsCount: number;
-  completedTasksCount: number;
-  lastCodeSnippet?: string;
-  lastErrorMessage?: string;
-  eventsLog: TelemetryEvent[];
-}
+export type { ClassroomStudentState };
 
 interface AppContextType {
   session: Session | null;

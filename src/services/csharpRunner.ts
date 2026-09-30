@@ -127,6 +127,29 @@ function isUnchangedStarterCode(userCode: string, initialCode?: string): boolean
 function runCsharpInSandbox(rawCode: string): { output: string; error?: string } {
   const codeWithoutComments = stripComments(rawCode);
 
+  // Security check: block attempts to escape the client sandbox
+  const forbiddenPatterns = [
+    /\bwindow\b/i,
+    /\bdocument\b/i,
+    /\blocalStorage\b/i,
+    /\bsessionStorage\b/i,
+    /\bindexedDB\b/i,
+    /\bfetch\b/i,
+    /\bXMLHttpRequest\b/i,
+    /\beval\b/i,
+    /\bFunction\b/i,
+    /\bimportScripts\b/i,
+    /\bglobalThis\b/i,
+    /\bprocess\b/i,
+    /\b__proto__\b/i,
+    /\bconstructor\b/i
+  ];
+  for (const pattern of forbiddenPatterns) {
+    if (pattern.test(codeWithoutComments)) {
+      return { output: '', error: 'Выполнение остановлено: обнаружен недопустимый системный вызов в песочнице.' };
+    }
+  }
+
   try {
     // 1. Transform C# to executable JavaScript
     let js = codeWithoutComments;
@@ -232,9 +255,15 @@ function runCsharpInSandbox(rawCode: string): { output: string; error?: string }
     js = js.replace(/\b[A-Z][a-zA-Z0-9_]*\s+([a-zA-Z0-9_]+)\s*=\s*new\s+/g, 'let $1 = new ');
 
     // C# new() expressions: new() => new List() or new Dictionary()
+    js = js.replace(/new\s+List<[a-zA-Z0-9_]+>(?:\(\))?\s*\{([^}]+)\}/g, 'new __List($1)');
     js = js.replace(/new\s+List<[a-zA-Z0-9_]+>\s*\(\)/g, 'new __List()');
     js = js.replace(/new\s+Dictionary<[a-zA-Z0-9_,\s]+>\s*\(\)/g, 'new __Dictionary()');
     js = js.replace(/new\s*\(\)/g, 'new __List()');
+
+    // Loop guard: prevent infinite loops from hanging the browser tab
+    js = js.replace(/\bwhile\s*\(([^)]+)\)\s*\{/g, 'while ($1) { __checkLoop(); ');
+    js = js.replace(/\bfor\s*\(([^)]+)\)\s*\{/g, 'for ($1) { __checkLoop(); ');
+    js = js.replace(/\bdo\s*\{/g, 'do { __checkLoop(); ');
 
     // Turn Program class into execution block
     if (/class\s+Program\b/.test(js)) {
@@ -353,15 +382,38 @@ function runCsharpInSandbox(rawCode: string): { output: string; error?: string }
       Join: (sep: string, items: any[]) => items.join(sep)
     };
 
-    // Construct and execute runner
+    let loopIterations = 0;
+    const __checkLoop = () => {
+      if (++loopIterations > 50000) {
+        throw new Error('Превышен лимит итераций цикла (защита от зависания браузера)');
+      }
+    };
+
+    // Construct and execute runner with Proxy sandbox trapping
     const sandboxScope = {
       Console: sandboxConsole,
       int: intHelper,
       String: stringHelper,
       Math,
       __List,
-      __Dictionary
+      __Dictionary,
+      __checkLoop
     };
+
+    const sandboxProxy = new Proxy(sandboxScope, {
+      has: () => true, // Intercept all identifier lookups so nothing falls through to window / global
+      get: (target: any, prop: string | symbol) => {
+        if (prop === Symbol.unscopables) return undefined;
+        if (typeof prop === 'string' && prop in target) {
+          return target[prop];
+        }
+        return undefined; // Block access to window/document/fetch/etc.
+      },
+      set: (target: any, prop: string | symbol, value: any) => {
+        target[prop] = value;
+        return true;
+      }
+    });
 
     const runner = new Function(
       'scope',
@@ -373,7 +425,7 @@ function runCsharpInSandbox(rawCode: string): { output: string; error?: string }
       }`
     );
 
-    runner(sandboxScope);
+    runner(sandboxProxy);
 
     return { output: outputBuffer.join('\n').trim() };
   } catch (err: any) {

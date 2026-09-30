@@ -127,3 +127,35 @@ export interface StudentLiveSession {
   eventsLog?: TelemetryEvent[];
 }
 
+export interface ClassroomStudentState {
+  id: string;
+  fullName: string;
+  avatarUrl?: string;
+  email: string;
+  groupName: string;
+  currentTaskId: string;
+  currentTaskTitle: string;
+  currentLessonTitle: string;
+  status: 'active' | 'stuck' | 'completed_step' | 'idle';
+  attemptsOnCurrentTask: number;
+  timeOnCurrentTaskMinutes: number;
+  needsHelp: boolean;
+  helpMessage?: string;
+  totalXp: number;
+  streakDays: number;
+  lastActive: string;
+  teacherComment?: string;
+  // Полная телеметрия и античит прокторинг
+  tabSwitchCount: number;
+  totalAwaySeconds: number;
+  pasteCount: number;
+  pastedCharsTotal: number;
+  isCurrentlyAway: boolean;
+  totalErrorsCount: number;
+  totalAttemptsCount: number;
+  completedTasksCount: number;
+  lastCodeSnippet?: string;
+  lastErrorMessage?: string;
+  eventsLog: TelemetryEvent[];
+}
+

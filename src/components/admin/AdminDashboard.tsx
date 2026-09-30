@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
 import type { ClassroomStudentState } from '../../context/AppContext';
 import type { Task, TaskType } from '../../types';
@@ -46,34 +46,12 @@ import {
   Laptop
 } from 'lucide-react';
 
-const TEACHER_LOGINS = ['kos108568-sys', 'kos108568'];
-
-export const calculateHonesty = (student: ClassroomStudentState) => {
-  const switches = student.tabSwitchCount || 0;
-  const pastes = student.pasteCount || 0;
-  const awaySec = student.totalAwaySeconds || 0;
-  const penalty = switches * 4 + pastes * 6 + (awaySec > 120 ? 15 : awaySec > 40 ? 8 : 0);
-  const score = Math.max(15, Math.min(100, 100 - penalty));
-  let label = 'Высокая (Самостоятельно)';
-  let color = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
-  let badgeText = 'Честно';
-  if (score < 60) {
-    label = 'Низкая (Риск списывания / AI)';
-    color = 'text-red-400 bg-red-500/10 border-red-500/20';
-    badgeText = 'Подозрение';
-  } else if (score < 85) {
-    label = 'Средняя (Частые смены окон)';
-    color = 'text-amber-400 bg-amber-500/10 border-amber-500/20';
-    badgeText = 'Внимание';
-  }
-  return { score, label, color, badgeText };
-};
+import { isTeacherProfile, isMockStudent, calculateHonesty } from '../../utils/studentFilters';
 
 export const AdminDashboard: React.FC = () => {
   const {
     studentsInClass,
     course,
-    currentUser,
     sendHelpResponse,
     clearStuckStatus,
     addNewTask,
@@ -138,23 +116,6 @@ export const AdminDashboard: React.FC = () => {
     refreshStudentsAndGroups();
   }, [activeTab]);
 
-  // Проверка: является ли пользователь преподавателем/админом
-  const isTeacherProfile = (s: any) => {
-    if (!s) return false;
-    if (s.role === 'teacher') return true;
-    const email = (s.email || '').toLowerCase();
-    if (TEACHER_LOGINS.some(t => email.includes(t))) return true;
-    if (currentUser?.role === 'teacher' && s.id === currentUser.id) return true;
-    if (s.groupName === 'Преподавательский состав' || s.group_name === 'Преподавательский состав') return true;
-    return false;
-  };
-
-  // Проверка: моковые студенты из старых шаблонов
-  const isMockStudent = (s: any) => {
-    if (!s || !s.id) return true;
-    return String(s.id).startsWith('stud-') || s.email === 'a.smirnov@university.edu';
-  };
-
   // Все доступные группы из базы и профилей студентов
   const allAvailableGroups = useMemo(() => {
     const set = new Set<string>(academicGroups);
@@ -180,7 +141,7 @@ export const AdminDashboard: React.FC = () => {
   // ЕДИНЫЙ МАППЕР СТУДЕНТА:
   // Первоисточник информации о студенте (ФИО, группа, XP) ВСЕГДА берется из базы profiles (allStudents)!
   // Это гарантирует 100% совпадение группы на дашборде, в радаре, журнале и во вкладке студентов.
-  const getUnifiedStudent = (student: any): ClassroomStudentState => {
+  const getUnifiedStudent = useCallback((student: any): ClassroomStudentState => {
     const live = realSessions.find(sess => sess.id === student.id || (student.email && sess.email === student.email));
     return {
       id: student.id,
@@ -213,7 +174,7 @@ export const AdminDashboard: React.FC = () => {
       lastErrorMessage: live?.lastErrorMessage,
       eventsLog: live?.eventsLog || []
     };
-  };
+  }, [realSessions]);
 
   // Студенты для Аудиторного Радара
   const radarStudents: ClassroomStudentState[] = useMemo(() => {
@@ -224,7 +185,7 @@ export const AdminDashboard: React.FC = () => {
     }
     return realSessions
       .filter(s => radarGroup === 'all' || s.groupName === radarGroup);
-  }, [realApprovedStudents, realSessions, radarGroup]);
+  }, [realApprovedStudents, realSessions, radarGroup, getUnifiedStudent]);
 
   // Студенты для Журнала Успеваемости
   const gradebookStudents: ClassroomStudentState[] = useMemo(() => {
@@ -235,7 +196,7 @@ export const AdminDashboard: React.FC = () => {
     }
     return realSessions
       .filter(s => gradebookGroup === 'all' || s.groupName === gradebookGroup);
-  }, [realApprovedStudents, realSessions, gradebookGroup]);
+  }, [realApprovedStudents, realSessions, gradebookGroup, getUnifiedStudent]);
 
   const stuckStudents = radarStudents.filter(s => s.status === 'stuck' || s.needsHelp);
   const pendingStudents = allStudents.filter(s => !s.is_approved && !isTeacherProfile(s) && !isMockStudent(s));
@@ -261,17 +222,29 @@ export const AdminDashboard: React.FC = () => {
     setIsProcessingStudent(true);
     setActionError(null);
     setActionSuccess(null);
-    const success = await updateAndApproveStudentProfile(studentId, fullName, groupName, true);
-    if (!success) {
-      setActionError('Не удалось обновить статус студента в базе Supabase. Возможные причины: в базе отсутствуют нужные политики RLS для обновления профилей учителем или не создана функция approve_student. Запустите скрипт "fixApprovalAndRealtime.sql" во вкладке "Supabase & SQL".');
-    } else {
-      setActionSuccess(`Студент "${fullName}" успешно допущен к занятиям!`);
-      // Оптимистично обновляем локальный стейт, чтобы студент сразу исчез из ожидающих
-      setAllStudents(prev => prev.map(s => s.id === studentId ? { ...s, is_approved: true, full_name: fullName, group_name: groupName } : s));
-      setTimeout(() => setActionSuccess(null), 4000);
+
+    // Снимок состояния для отката при ошибке
+    const snapshot = [...allStudents];
+    // Оптимистичное обновление интерфейса
+    setAllStudents(prev => prev.map(s => s.id === studentId ? { ...s, is_approved: true, full_name: fullName, group_name: groupName } : s));
+
+    try {
+      const success = await updateAndApproveStudentProfile(studentId, fullName, groupName, true);
+      if (!success) {
+        // Откат к предыдущему состоянию (Rollback)
+        setAllStudents(snapshot);
+        setActionError('Не удалось обновить статус студента в базе Supabase. Действие отменено (rollback).');
+      } else {
+        setActionSuccess(`Студент "${fullName}" успешно допущен к занятиям!`);
+        setTimeout(() => setActionSuccess(null), 4000);
+      }
+    } catch {
+      setAllStudents(snapshot);
+      setActionError('Сетевая ошибка при обновлении статуса студента (rollback).');
+    } finally {
+      await refreshStudentsAndGroups();
+      setIsProcessingStudent(false);
     }
-    await refreshStudentsAndGroups();
-    setIsProcessingStudent(false);
   };
 
   const handleRejectStudent = async (studentId: string) => {
@@ -279,16 +252,29 @@ export const AdminDashboard: React.FC = () => {
       setIsProcessingStudent(true);
       setActionError(null);
       setActionSuccess(null);
-      const success = await rejectStudentProfile(studentId);
-      if (!success) {
-        setActionError('Не удалось отклонить заявку в базе данных Supabase.');
-      } else {
-        setActionSuccess('Заявка студента отклонена.');
-        setAllStudents(prev => prev.filter(s => s.id !== studentId));
-        setTimeout(() => setActionSuccess(null), 4000);
+
+      // Снимок состояния для отката
+      const snapshot = [...allStudents];
+      // Оптимистичное удаление из списка
+      setAllStudents(prev => prev.filter(s => s.id !== studentId));
+
+      try {
+        const success = await rejectStudentProfile(studentId);
+        if (!success) {
+          // Откат к предыдущему состоянию (Rollback)
+          setAllStudents(snapshot);
+          setActionError('Не удалось отклонить заявку в базе данных Supabase (rollback).');
+        } else {
+          setActionSuccess('Заявка студента отклонена.');
+          setTimeout(() => setActionSuccess(null), 4000);
+        }
+      } catch {
+        setAllStudents(snapshot);
+        setActionError('Сетевая ошибка при отклонении заявки (rollback).');
+      } finally {
+        await refreshStudentsAndGroups();
+        setIsProcessingStudent(false);
       }
-      await refreshStudentsAndGroups();
-      setIsProcessingStudent(false);
     }
   };
 

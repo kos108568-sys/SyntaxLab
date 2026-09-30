@@ -617,11 +617,36 @@ export async function submitStudentOnboarding(
   groupName: string
 ): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
+
+  const cleanName = fullName.trim();
+  const cleanGroup = groupName.trim();
+
+  // Строгая клиентская валидация входных данных
+  if (cleanName.length < 2 || cleanName.length > 100) {
+    console.warn('Валидация отклонила ФИО: некорректная длина');
+    return false;
+  }
+  const nameRegex = /^[a-zA-Zа-яА-ЯёЁ\s\-'.]+$/u;
+  if (!nameRegex.test(cleanName)) {
+    console.warn('Валидация отклонила ФИО: содержит недопустимые символы');
+    return false;
+  }
+
+  if (cleanGroup.length < 2 || cleanGroup.length > 50) {
+    console.warn('Валидация отклонила группу: некорректная длина');
+    return false;
+  }
+  const groupRegex = /^[a-zA-Zа-яА-ЯёЁ0-9\-_]+$/u;
+  if (!groupRegex.test(cleanGroup)) {
+    console.warn('Валидация отклонила группу: содержит недопустимые символы');
+    return false;
+  }
+
   try {
     // 1. Попытка через безопасную RPC функцию submit_onboarding
     const { error: rpcErr } = await supabase.rpc('submit_onboarding', {
-      new_full_name: fullName.trim(),
-      new_group_name: groupName.trim()
+      new_full_name: cleanName,
+      new_group_name: cleanGroup
     });
     if (!rpcErr) return true;
 
