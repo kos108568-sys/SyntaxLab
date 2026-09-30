@@ -7,15 +7,20 @@ export async function submitSolution(kind: SubmissionKind, payload: Record<strin
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session) throw new Error('Войдите в аккаунт, чтобы проверить решение.');
 
-  const response = await fetch(`${import.meta.env.VITE_GRADING_API_URL || ''}/api/submit-${kind}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session.access_token}` },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(30_000)
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${import.meta.env.VITE_GRADING_API_URL || ''}/api/submit-${kind}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session.access_token}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30_000)
+    });
+  } catch {
+    throw new Error('Сервер проверки недоступен. Запустите grading API или обратитесь к преподавателю.');
+  }
 
   let body: { error?: string } & Partial<RunResult>;
-  try { body = await response.json(); } catch { throw new Error('Сервис проверки вернул некорректный ответ.'); }
+  try { body = await response.json(); } catch { throw new Error('Сервер проверки вернул не-JSON ответ. Проверьте адрес grading API.'); }
   if (!response.ok) throw new Error(body.error || 'Не удалось проверить решение.');
   return body as RunResult;
 }

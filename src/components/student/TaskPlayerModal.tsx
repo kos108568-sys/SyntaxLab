@@ -51,6 +51,7 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   } = useApp();
 
   const isAlreadyCompleted = completedTaskIds.includes(task.id);
+  const usesHostedCsharpEditor = ['code_challenge', 'code_fill', 'spot_bug'].includes(task.type);
   const currentStudentData = currentUser ? studentsInClass.find(s => s.id === currentUser.id) : null;
 
   const [code, setCode] = useState(() => normalizeCode(task.initialCode));
@@ -514,7 +515,17 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
             {/* Task Type: Code Challenge or Bug Hunt */}
             {task.type !== 'quiz' ? (
               <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Code Textarea with Line Numbers */}
+                {usesHostedCsharpEditor ? (
+                  <div className="flex-1 min-h-[440px] bg-slate-950">
+                    <iframe
+                      key={task.id}
+                      src={`https://coddy.tech/embed-editor?lang=csharp&theme=dark&layout=stacked&code=${toUrlSafeBase64(code)}`}
+                      title={`C# editor: ${task.title}`}
+                      className="h-full min-h-[440px] w-full border-0"
+                      allow="clipboard-read; clipboard-write"
+                    />
+                  </div>
+                ) : <>
                 <div className="flex-1 p-3 overflow-y-auto font-mono text-xs sm:text-sm flex flex-col bg-slate-950">
                   {pasteNotice && (
                     <div className="mb-2 py-1 px-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs flex items-center gap-2">
@@ -575,6 +586,7 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
                     )}
                   </div>
                 </div>
+                </>}
               </div>
             ) : (
               /* Quiz Type */
@@ -661,7 +673,7 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
 
           {/* Right Action buttons */}
           <div className="flex items-center gap-2 ml-auto">
-            {task.type !== 'quiz' && (
+            {task.type !== 'quiz' && !usesHostedCsharpEditor && (
               <button
                 type="button"
                 disabled={isRunning}
@@ -734,3 +746,10 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
     </div>
   );
 };
+function toUrlSafeBase64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
