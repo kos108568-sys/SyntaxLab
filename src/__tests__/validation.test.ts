@@ -20,9 +20,8 @@ test('Validation: Malformed group name is rejected', () => {
 });
 
 test('Student Filters: Teacher detection works reliably', () => {
-  assert.strictEqual(isTeacherProfile({ email: 'kos108568@gmail.com', role: 'student' }), true);
   assert.strictEqual(isTeacherProfile({ email: 'student@example.com', role: 'teacher' }), true);
-  assert.strictEqual(isTeacherProfile({ email: 'student@example.com', groupName: 'Преподавательский состав' }), true);
+  assert.strictEqual(isTeacherProfile({ email: 'kos108568@gmail.com', role: 'student' }), false);
   assert.strictEqual(isTeacherProfile({ email: 'student@example.com', role: 'student', groupName: 'ИТ-301' }), false);
 });
 

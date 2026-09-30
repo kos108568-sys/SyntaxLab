@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +12,9 @@ export async function runCsharp(code) {
   try {
     await writeFile(join(directory, 'Program.cs'), code);
     await writeFile(join(directory, 'Submission.csproj'), project);
+    await chmod(directory, 0o755);
+    await chmod(join(directory, 'Program.cs'), 0o644);
+    await chmod(join(directory, 'Submission.csproj'), 0o644);
     return await new Promise((resolve, reject) => {
       const args = ['run', '--rm', '--name', name, '--network', 'none', '--read-only',
         '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '128',

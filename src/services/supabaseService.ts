@@ -62,8 +62,6 @@ export async function loadCourseFromSupabase(courseId = 'csharp-foundations'): P
               instructions: t.instructions,
               theorySnippet: t.theory_snippet ? t.theory_snippet.replace(/\\n/g, '\n') : '',
               initialCode: t.initial_code ? t.initial_code.replace(/\\n/g, '\n').replace(/\\t/g, '    ') : '',
-              solutionCode: t.solution_code ? t.solution_code.replace(/\\n/g, '\n').replace(/\\t/g, '    ') : '',
-              tests: t.tests,
               quizOptions: t.quiz_options,
               hints: t.hints
             }));
@@ -289,7 +287,7 @@ export async function updateSessionInDb(
 
 // 4.1 Обновление расширенной телеметрии (сворачивание окон, вставки, ошибки)
 export async function updateSessionTelemetryInDb(
-  userId: string,
+  _userId: string,
   event?: any,
   dataUpdate?: any
 ) {
@@ -307,24 +305,7 @@ export async function updateSessionTelemetryInDb(
       if (!rpcErr) return;
     }
 
-    // 2. Прямой upsert в classroom_sessions с разрешением конфликта по user_id
-    const payload: any = {
-      user_id: userId,
-      last_ping_at: new Date().toISOString()
-    };
-    if (dataUpdate?.tabSwitchCount !== undefined) payload.tab_switch_count = dataUpdate.tabSwitchCount;
-    if (dataUpdate?.totalAwaySeconds !== undefined) payload.total_away_seconds = dataUpdate.totalAwaySeconds;
-    if (dataUpdate?.pasteCount !== undefined) payload.paste_count = dataUpdate.pasteCount;
-    if (dataUpdate?.pastedCharsTotal !== undefined) payload.pasted_chars_total = dataUpdate.pastedCharsTotal;
-    if (dataUpdate?.isCurrentlyAway !== undefined) payload.is_currently_away = dataUpdate.isCurrentlyAway;
-    if (dataUpdate?.totalErrorsCount !== undefined) payload.total_errors_count = dataUpdate.totalErrorsCount;
-    if (dataUpdate?.totalAttemptsCount !== undefined) payload.total_attempts_count = dataUpdate.totalAttemptsCount;
-    if (dataUpdate?.completedTasksCount !== undefined) payload.completed_tasks_count = dataUpdate.completedTasksCount;
-    if (dataUpdate?.lastCodeSnippet) payload.last_code_snippet = dataUpdate.lastCodeSnippet;
-    if (dataUpdate?.lastErrorMessage) payload.last_error_message = dataUpdate.lastErrorMessage;
-    if (event) payload.events_log = [event];
-
-    await supabase.from('classroom_sessions').upsert(payload, { onConflict: 'user_id' });
+    console.warn('Telemetry RPC rejected the update.');
   } catch (err) {
     console.warn('Error updating session telemetry in Supabase:', err);
   }
@@ -341,20 +322,14 @@ export async function sendTeacherHintToDb(studentId: string, comment: string) {
     });
     if (!rpcErr) return;
 
-    await supabase
-      .from('classroom_sessions')
-      .update({
-        teacher_comment: comment,
-        needs_help: false
-      })
-      .eq('user_id', studentId);
+    console.warn('Teacher hint RPC rejected the update.');
   } catch (err) {
     console.error('Error sending teacher hint:', err);
   }
 }
 
 // 5.1 Отправка / публикация объявления преподавателя
-export async function publishClassroomAnnouncement(groupName: string, message: string, teacherId?: string): Promise<boolean> {
+export async function publishClassroomAnnouncement(groupName: string, message: string, _teacherId?: string): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
   try {
     // 1. Попытка через RPC publish_announcement
@@ -364,26 +339,7 @@ export async function publishClassroomAnnouncement(groupName: string, message: s
     });
     if (!rpcErr) return true;
 
-    // 2. Прямая работа с таблицей classroom_announcements
-    await supabase
-      .from('classroom_announcements')
-      .update({ is_active: false })
-      .eq('group_name', groupName)
-      .eq('is_active', true);
-
-    if (message.trim()) {
-      const { error } = await supabase.from('classroom_announcements').insert({
-        group_name: groupName,
-        teacher_id: teacherId,
-        message: message.trim(),
-        is_active: true
-      });
-      if (error) {
-        console.error('Error inserting announcement:', error);
-        return false;
-      }
-    }
-    return true;
+    return false;
   } catch (err) {
     console.error('Error in publishClassroomAnnouncement:', err);
     return false;

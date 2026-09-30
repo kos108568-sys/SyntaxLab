@@ -2,12 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useCall
 import type { Session, User } from '@supabase/supabase-js';
 import type { Course, UserProfile, UserRole, Task, TelemetryEvent, ClassroomStudentState } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { initialCsharpCourse } from '../data/csharpCourse';
 import {
   loadCourseFromSupabase,
   loadClassroomSessionsFromDb,
   subscribeToClassroomRealtime,
-  saveProgressToDb,
   updateSessionInDb,
   updateSessionTelemetryInDb,
   sendTeacherHintToDb,
@@ -94,8 +92,6 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
-
-const TEACHER_GITHUB_LOGINS = ['kos108568-sys', 'kos108568'];
 
 export const hasStoredAuthToken = (): boolean => {
   if (typeof window === 'undefined' || !window.localStorage) return false;
@@ -207,8 +203,7 @@ const getInitialClassroomStudents = (): ClassroomStudentState[] => {
             s && s.id &&
             !s.id.startsWith('stud-') &&
             s.email !== 'a.smirnov@university.edu' &&
-            s.groupName !== 'Преподавательский состав' &&
-            !TEACHER_GITHUB_LOGINS.some(t => (s.email || '').toLowerCase().includes(t))
+            s.groupName !== 'Преподавательский состав'
           );
           return realOnly;
         }
@@ -248,7 +243,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const [groupCourseAccess, setGroupCourseAccess] = useState<Record<string, string[]>>(() => getInitialGroupAccess());
-  const [course, setCourse] = useState<Course | null>(initialCsharpCourse);
+  // Course content always comes from Supabase. Do not keep answers in the browser bundle.
+  const [course, setCourse] = useState<Course | null>(null);
   const [studentsInClass, setStudentsInClass] = useState<ClassroomStudentState[]>(() => getInitialClassroomStudents());
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
@@ -339,12 +335,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .maybeSingle();
 
       const githubMetadata = user.user_metadata || {};
-      const githubLogin = (githubMetadata.user_name || githubMetadata.preferred_username || '').toLowerCase();
-      const isTeacher = TEACHER_GITHUB_LOGINS.includes(githubLogin);
-      
       const fullName = githubMetadata.full_name || githubMetadata.user_name || user.email?.split('@')[0] || 'Студент';
       const avatarUrl = githubMetadata.avatar_url;
-      const resolvedRole: UserRole = isTeacher ? 'teacher' : ((data?.role as UserRole) || 'student');
+      const resolvedRole: UserRole = (data?.role as UserRole) || 'student';
 
       if (!data) {
         // Создаем профиль в базе данных
@@ -354,10 +347,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           fullName,
           avatarUrl,
           role: resolvedRole,
-          groupName: isTeacher ? 'Преподавательский состав' : '',
-          isApproved: isTeacher ? true : false,
+          groupName: '',
+          isApproved: false,
           currentStreakDays: 1,
-          totalXp: isTeacher ? 1000 : 0,
+          totalXp: 0,
           isOnline: true
         };
 
@@ -367,8 +360,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           full_name: fullName,
           avatar_url: avatarUrl,
           role: resolvedRole,
-          group_name: isTeacher ? 'Преподавательский состав' : null,
-          is_approved: isTeacher ? true : false
+          group_name: null,
+          is_approved: false
         });
 
         setCurrentUser(newProfile);
@@ -377,19 +370,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           localStorage.setItem('syntaxlab_cached_user', JSON.stringify(newProfile));
         } catch {}
       } else {
-        // Если пользователь преподаватель, но в БД еще значился студентом — обновляем в БД
-        if (isTeacher && data.role !== 'teacher') {
-          await supabase.from('profiles').update({ role: 'teacher', is_approved: true }).eq('id', user.id);
-        }
-
         const existingProfile: UserProfile = {
           id: data.id,
           email: data.email,
           fullName: data.full_name || fullName,
           avatarUrl: data.avatar_url || avatarUrl,
           role: resolvedRole,
-          groupName: data.group_name || (isTeacher ? 'Преподавательский состав' : ''),
-          isApproved: isTeacher ? true : (data.is_approved ?? false),
+          groupName: data.group_name || '',
+          isApproved: data.is_approved ?? false,
           currentStreakDays: data.streak_days || 1,
           totalXp: data.total_xp || 0,
           isOnline: true
@@ -442,26 +430,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
       ]);
 
-      const dbTaskCount = (dbCourse?.modules || []).reduce((acc: number, m: any) => acc + (m.lessons || []).reduce((lacc: number, l: any) => lacc + (l.tasks?.length || 0), 0), 0);
-      const localTaskCount = initialCsharpCourse.modules.reduce((acc, m) => acc + m.lessons.reduce((lacc, l) => lacc + l.tasks.length, 0), 0);
-
-      if (dbCourse && dbTaskCount >= localTaskCount) {
-        setCourse(dbCourse);
-      } else {
-        setCourse(initialCsharpCourse);
-      }
+      setCourse(dbCourse);
 
       if (dbSessions && dbSessions.length > 0) {
         setStudentsInClass(dbSessions.filter(s => 
-          !s.id.startsWith('stud-') &&
-          s.email !== 'a.smirnov@university.edu' &&
-          !TEACHER_GITHUB_LOGINS.some(t => (s.email || '').toLowerCase().includes(t))
+          !s.id.startsWith('stud-') && s.email !== 'a.smirnov@university.edu'
         ));
       } else {
         setStudentsInClass(prev => prev.filter(s => 
-          !s.id.startsWith('stud-') &&
-          s.email !== 'a.smirnov@university.edu' &&
-          !TEACHER_GITHUB_LOGINS.some(t => (s.email || '').toLowerCase().includes(t))
+          !s.id.startsWith('stud-') && s.email !== 'a.smirnov@university.edu'
         ));
       }
 
@@ -470,16 +447,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const prof = profRes.data;
         const { data: currentSessData } = await supabase.auth.getSession();
         const githubMetadata = currentSessData.session?.user?.user_metadata || {};
-        const githubLogin = (githubMetadata.user_name || githubMetadata.preferred_username || '').toLowerCase();
-        const isTeacher = TEACHER_GITHUB_LOGINS.includes(githubLogin);
         const updatedProfile: UserProfile = {
           id: prof.id,
           email: prof.email || currentSessData.session?.user?.email || '',
           fullName: prof.full_name || githubMetadata.full_name || 'Студент',
           avatarUrl: prof.avatar_url || githubMetadata.avatar_url,
-          role: isTeacher ? 'teacher' : ((prof.role as UserRole) || 'student'),
-          groupName: prof.group_name || (isTeacher ? 'Преподавательский состав' : ''),
-          isApproved: isTeacher ? true : (prof.is_approved ?? false),
+          role: (prof.role as UserRole) || 'student',
+          groupName: prof.group_name || '',
+          isApproved: prof.is_approved ?? false,
           currentStreakDays: prof.streak_days || 1,
           totalXp: prof.total_xp || 0,
           isOnline: true
@@ -628,19 +603,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const completeTask = (taskId: string, xpEarned: number) => {
+  const completeTask = (taskId: string, _xpEarned: number) => {
     const isAlreadyCompleted = completedTaskIds.includes(taskId);
     if (!isAlreadyCompleted) {
       setCompletedTaskIds(prev => [...prev, taskId]);
     }
 
     if (currentUser?.id && currentUser.role !== 'teacher') {
-      let lessonId = course?.modules.flatMap(m => m.lessons).find(l => l.tasks.some(t => t.id === taskId))?.id;
-      if (!lessonId && (taskId.startsWith('intro') || taskId.startsWith('ramp') || taskId.startsWith('move') || taskId.startsWith('mixed') || taskId.startsWith('adv') || taskId.startsWith('rem'))) {
-        lessonId = 'git-lessons';
-      }
-      const xpToAward = isAlreadyCompleted ? 0 : xpEarned;
-      saveProgressToDb(currentUser.id, taskId, lessonId || null, xpToAward);
       updateSessionInDb(currentUser.id, taskId, 'completed_step', false, undefined, currentUser.groupName);
     }
   };
@@ -655,9 +624,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const recordStudentTelemetry = useCallback((event: TelemetryEvent, dataUpdate?: Partial<ClassroomStudentState>) => {
     // Преподаватель/админ не является студентом и не регистрируется в телеметрии
     if (!currentUser || currentUser.role === 'teacher') return;
-    const userEmail = (currentUser.email || '').toLowerCase();
-    if (TEACHER_GITHUB_LOGINS.some(t => userEmail.includes(t))) return;
-
     const studentId = currentUser.id;
 
     setStudentsInClass(prev => {

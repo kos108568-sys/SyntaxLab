@@ -4,8 +4,6 @@ import { HONESTY_PENALTY_WEIGHTS } from '../constants/telemetryWeights.ts';
 /**
  * Список логинов и email адресов преподавателей/администраторов.
  */
-export const TEACHER_IDENTIFIERS = ['kos108568-sys', 'kos108568', 'kos108568@gmail.com'];
-
 /**
  * Проверка, относится ли профиль к преподавателю/администратору.
  */
@@ -13,13 +11,6 @@ export function isTeacherProfile(profile: any, currentUserId?: string, currentUs
   if (!profile) return false;
   if (profile.role === 'teacher') return true;
   if (currentUserRole === 'teacher' && currentUserId && profile.id === currentUserId) return true;
-
-  const email = (profile.email || '').toLowerCase();
-  if (TEACHER_IDENTIFIERS.some(id => email.includes(id))) return true;
-
-  const group = profile.groupName || profile.group_name;
-  if (group === 'Преподавательский состав') return true;
-
   return false;
 }
 

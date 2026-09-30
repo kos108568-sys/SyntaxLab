@@ -69,7 +69,7 @@ export const StudentView: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3">
         <Terminal className="w-7 h-7 animate-spin text-indigo-400" />
-        <p className="text-xs font-mono">Синхронизация курса C# с базой данных Supabase...</p>
+        <p className="text-xs font-mono">Курс пока не загружен. Проверьте подключение к Supabase и миграции учебной программы.</p>
       </div>
     );
   }

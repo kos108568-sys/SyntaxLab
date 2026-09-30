@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Task, Lesson } from '../../types';
 import { useApp } from '../../context/AppContext';
-import { evaluateCsharpCode } from '../../services/csharpRunner';
+import { evaluateCsharpCode, submitQuizAnswer } from '../../services/csharpRunner';
 import type { RunResult } from '../../services/csharpRunner';
 import {
   Play,
@@ -206,16 +206,15 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   };
 
   // Run Code logic
-  const handleRunCode = () => {
+  const handleRunCode = async () => {
     setIsRunning(true);
-    setTimeout(() => {
-      const result = evaluateCsharpCode(code, task);
+    try {
+      const result = await evaluateCsharpCode(code, task);
       setRunResult(result);
-      setIsRunning(false);
       reportTaskAttempt(task.id, result.success);
 
       if (result.success) {
-        completeTask(task.id, task.xp);
+        completeTask(task.id, result.xpAwarded ?? 0);
         setShowSuccessCelebration(true);
 
         recordStudentTelemetry(
@@ -256,21 +255,35 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
           }
         );
       }
-    }, 400);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Сервис проверки недоступен.';
+      const result: RunResult = { success: false, output: '', errorMessage: message, testsPassed: 0, totalTests: 0, details: [] };
+      setRunResult(result);
+      reportTaskAttempt(task.id, false);
+    } finally {
+      setIsRunning(false);
+    }
   };
 
   // Submit Quiz logic
-  const handleQuizAnswer = (optionId: string) => {
+  const handleQuizAnswer = async (optionId: string) => {
     if (quizSubmitted) return;
     setSelectedQuizOptionId(optionId);
     setQuizSubmitted(true);
 
-    const option = task.quizOptions?.find(o => o.id === optionId);
-    const isCorrect = Boolean(option?.isCorrect);
+    let result: RunResult;
+    try {
+      result = await submitQuizAnswer(task.id, optionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Сервис проверки недоступен.';
+      result = { success: false, output: '', errorMessage: message, testsPassed: 0, totalTests: 1, details: [] };
+    }
+    setRunResult(result);
+    const isCorrect = result.success;
     reportTaskAttempt(task.id, isCorrect);
 
     if (isCorrect) {
-      completeTask(task.id, task.xp);
+      completeTask(task.id, result.xpAwarded ?? 0);
       setShowSuccessCelebration(true);
 
       recordStudentTelemetry(
@@ -570,8 +583,8 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
                 <div className="space-y-2.5">
                   {task.quizOptions?.map((option) => {
                     const isSelected = selectedQuizOptionId === option.id;
-                    const showCorrect = quizSubmitted && option.isCorrect;
-                    const showIncorrect = quizSubmitted && isSelected && !option.isCorrect;
+                    const showCorrect = quizSubmitted && isSelected && runResult?.success;
+                    const showIncorrect = quizSubmitted && isSelected && !runResult?.success;
 
                     return (
                       <button
@@ -594,11 +607,6 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
                           {showCorrect && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
                           {showIncorrect && <X className="w-4 h-4 text-red-400" />}
                         </div>
-                        {quizSubmitted && option.explanation && (
-                          <p className="text-xs text-slate-400 mt-2 pt-2 border-t border-slate-800/80 font-normal">
-                            {option.explanation}
-                          </p>
-                        )}
                       </button>
                     );
                   })}

@@ -10,6 +10,7 @@ import {
 } from '../../services/gitEngine';
 import { GitGraphVisualizer } from './GitGraphVisualizer';
 import { GitTerminal, type TerminalLogEntry } from './GitTerminal';
+import { submitGitCommands } from '../../services/csharpRunner';
 import { 
   GitBranch, 
   BookOpen, 
@@ -32,6 +33,7 @@ export const GitBranchingLab: React.FC = () => {
   const [isSandbox, setIsSandbox] = useState<boolean>(false);
   const [gitState, setGitState] = useState<GitState>(() => cloneGitState(GIT_LEVELS[0].initialState));
   const [historyStack, setHistoryStack] = useState<GitState[]>([]);
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [logs, setLogs] = useState<TerminalLogEntry[]>([]);
   const [showGoalModal, setShowGoalModal] = useState<boolean>(false);
   const [showTutorialModal, setShowTutorialModal] = useState<boolean>(true);
@@ -64,6 +66,7 @@ export const GitBranchingLab: React.FC = () => {
     const initial = cloneGitState(lvl.initialState);
     setGitState(initial);
     setHistoryStack([]);
+    setCommandHistory([]);
     setLevelCompleted(false);
     setShowTutorialModal(true);
     setShowGoalModal(false);
@@ -82,6 +85,7 @@ export const GitBranchingLab: React.FC = () => {
     const clean = createInitialGitState();
     setGitState(clean);
     setHistoryStack([]);
+    setCommandHistory([]);
     setLevelCompleted(false);
     setShowTutorialModal(false);
     setShowGoalModal(false);
@@ -100,12 +104,25 @@ export const GitBranchingLab: React.FC = () => {
 
     if (isGitGoalReached(gitState, currentLevel.goalState)) {
       setLevelCompleted(true);
-      if (!completedLevels.includes(currentLevel.id)) {
-        setCompletedLevels(prev => [...prev, currentLevel.id]);
-        completeTask(currentLevel.id, currentLevel.xp);
-      }
+      void (async () => {
+        try {
+          const result = await submitGitCommands(currentLevel.id, commandHistory);
+          if (!result.success) throw new Error(result.errorMessage || 'Сервер не подтвердил цель уровня.');
+          if (!completedLevels.includes(currentLevel.id)) {
+            setCompletedLevels(prev => [...prev, currentLevel.id]);
+            completeTask(currentLevel.id, result.xpAwarded ?? 0);
+          }
+        } catch (error) {
+          setLevelCompleted(false);
+          setLogs(prev => [...prev, {
+            id: `verification-${Date.now()}`,
+            output: error instanceof Error ? error.message : 'Не удалось подтвердить решение на сервере.',
+            isError: true
+          }]);
+        }
+      })();
     }
-  }, [gitState, currentLevel, isSandbox, levelCompleted, completedLevels, completeTask]);
+  }, [gitState, currentLevel, isSandbox, levelCompleted, completedLevels, commandHistory, completeTask]);
 
   // Execute terminal command
   const handleExecuteCommand = (cmdText: string) => {
@@ -138,11 +155,12 @@ export const GitBranchingLab: React.FC = () => {
       return;
     }
 
-    // Save previous state to history stack for undo
-    setHistoryStack(prev => [...prev, cloneGitState(gitState)]);
-
     // Execute via GitEngine
     const result = executeGitCommand(gitState, trimmed);
+    if (!result.isError) {
+      setHistoryStack(prev => [...prev, cloneGitState(gitState)]);
+      setCommandHistory(prev => [...prev, trimmed]);
+    }
     setGitState(result.nextState);
 
     setLogs(prev => [
@@ -172,6 +190,7 @@ export const GitBranchingLab: React.FC = () => {
 
     const previousState = historyStack[historyStack.length - 1];
     setHistoryStack(prev => prev.slice(0, -1));
+    setCommandHistory(prev => prev.slice(0, -1));
     setGitState(previousState);
     setLevelCompleted(false);
 
@@ -194,6 +213,7 @@ export const GitBranchingLab: React.FC = () => {
     const initial = cloneGitState(currentLevel.initialState);
     setGitState(initial);
     setHistoryStack([]);
+    setCommandHistory([]);
     setLevelCompleted(false);
 
     setLogs(prev => [

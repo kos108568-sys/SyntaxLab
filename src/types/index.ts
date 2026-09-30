@@ -21,7 +21,7 @@ export interface UserProfile {
   lastActiveAt?: string;
 }
 
-export type TaskType = 'code_challenge' | 'quiz' | 'code_fill' | 'spot_bug';
+export type TaskType = 'code_challenge' | 'quiz' | 'code_fill' | 'spot_bug' | 'git';
 
 export interface CodeTest {
   id: string;
@@ -42,7 +42,8 @@ export interface Task {
   initialCode?: string;
   solutionCode?: string;
   tests?: CodeTest[];
-  quizOptions?: { id: string; text: string; isCorrect: boolean; explanation?: string }[];
+  /** Correctness is intentionally omitted from student-facing task payloads. */
+  quizOptions?: { id: string; text: string; isCorrect?: boolean; explanation?: string }[];
   fillBlanksTemplate?: string; // e.g. "for (int i = 0; i < __BLANK_1__; i++)"
   fillBlanksAnswers?: string[]; // e.g. ["10"]
   hints: string[];
