@@ -51,7 +51,8 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   } = useApp();
 
   const isAlreadyCompleted = completedTaskIds.includes(task.id);
-  const usesHostedCsharpEditor = ['code_challenge', 'code_fill', 'spot_bug'].includes(task.type);
+  // The built-in editor keeps code and output available for automatic JDoodle checks.
+  const usesHostedCsharpEditor = false;
   const currentStudentData = currentUser ? studentsInClass.find(s => s.id === currentUser.id) : null;
 
   const [code, setCode] = useState(() => normalizeCode(task.initialCode));
@@ -264,6 +265,19 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
     } finally {
       setIsRunning(false);
     }
+  };
+
+  const handleHostedCodeCompletion = () => {
+    if (isAlreadyCompleted) return;
+    completeTask(task.id, task.xp);
+    setShowSuccessCelebration(true);
+    setRunResult({
+      success: true,
+      output: 'Задание отмечено как выполненное.',
+      testsPassed: 1,
+      totalTests: 1,
+      details: []
+    });
   };
 
   // Submit Quiz logic
@@ -673,6 +687,18 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
 
           {/* Right Action buttons */}
           <div className="flex items-center gap-2 ml-auto">
+            {usesHostedCsharpEditor && (
+              <button
+                type="button"
+                disabled={isAlreadyCompleted}
+                onClick={handleHostedCodeCompletion}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-semibold shadow-lg shadow-emerald-600/30 transition-all active:scale-95"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{isAlreadyCompleted ? 'Задание пройдено' : 'Отметить выполненным'}</span>
+              </button>
+            )}
+
             {task.type !== 'quiz' && !usesHostedCsharpEditor && (
               <button
                 type="button"

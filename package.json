@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "grader": "node --experimental-strip-types server/index.mjs",
+    "grader": "node --env-file=.env --experimental-strip-types server/index.mjs",
     "build": "tsc -b && vite build",
     "test": "node --experimental-strip-types --test src/__tests__/*.test.ts server/*.test.mjs",
     "lint": "oxlint",

@@ -7,6 +7,9 @@ import { randomUUID } from 'node:crypto';
 export const project = `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><LangVersion>12</LangVersion><ImplicitUsings>disable</ImplicitUsings><Nullable>disable</Nullable><UseAppHost>false</UseAppHost></PropertyGroup></Project>`;
 
 export async function runCsharp(code) {
+  if (process.env.JDOODLE_CLIENT_ID && process.env.JDOODLE_CLIENT_SECRET) {
+    return runCsharpWithJdoodle(code);
+  }
   const directory = await mkdtemp(join(tmpdir(), 'syntaxlab-'));
   const name = `syntaxlab-${randomUUID()}`;
   try {
@@ -47,4 +50,36 @@ export async function runCsharp(code) {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+async function runCsharpWithJdoodle(code) {
+  const response = await fetch('https://api.jdoodle.com/v1/execute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      clientId: process.env.JDOODLE_CLIENT_ID,
+      clientSecret: process.env.JDOODLE_CLIENT_SECRET,
+      script: code,
+      language: 'csharp',
+      versionIndex: '6'
+    }),
+    signal: AbortSignal.timeout(30_000)
+  });
+
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result || result.statusCode !== 200) {
+    return {
+      exitCode: 1,
+      output: result?.output || '',
+      error: result?.error || 'JDoodle could not execute the program.'
+    };
+  }
+
+  const output = result.output || '';
+  const buildLogEnd = /Time Elapsed[^\r\n]*\r?\n?/m.exec(output);
+  return {
+    exitCode: 0,
+    output: buildLogEnd ? output.slice(buildLogEnd.index + buildLogEnd[0].length) : output,
+    error: ''
+  };
 }
