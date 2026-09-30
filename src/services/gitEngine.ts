@@ -3,6 +3,7 @@ export interface GitCommit {
   parentIds: string[];
   message?: string;
   isRoot?: boolean;
+  sourceId?: string;
 }
 
 export interface GitHead {
@@ -16,6 +17,7 @@ export interface GitState {
   tags?: Record<string, string>;     // tagName -> commitId
   head: GitHead;
   commitCounter: number;
+  rebasePlan?: { base: string; commits: string[] };
 }
 
 export interface GitExecutionResult {
@@ -55,6 +57,7 @@ export function cloneGitState(state: GitState): GitState {
     tags: { ...(state.tags || {}) },
     head: { ...state.head },
     commitCounter: state.commitCounter
+    ,rebasePlan: state.rebasePlan ? { ...state.rebasePlan, commits: [...state.rebasePlan.commits] } : undefined
   };
 }
 
@@ -144,7 +147,8 @@ export function resolveRef(state: GitState, ref: string): string | null {
   // HEAD~N or ref~N
   if (ref.includes('~')) {
     const [base, offsetStr] = ref.split('~');
-    const offset = parseInt(offsetStr, 10) || 1;
+    const offset = offsetStr === '' ? 1 : Number(offsetStr);
+    if (!Number.isInteger(offset) || offset < 0 || offset > 1000) return null;
     let currId = base === 'HEAD' ? getHeadCommitId(state) : (state.branches[base] || (state.tags && state.tags[base]) || base);
 
     for (let i = 0; i < offset; i++) {
@@ -319,7 +323,8 @@ export function executeGitCommand(
       return { nextState: state, output: `Ошибка: коммит "${args[1]}" не существует.`, isError: true };
     }
 
-    state.branches[newBranchName] = targetCommit;
+    if (Object.hasOwn(state.branches, newBranchName) || !/^[A-Za-z0-9][A-Za-z0-9/_-]*$/.test(newBranchName)) return { nextState: currentState, output: '???????????? ??? ??? ??????? ??? ?????.', isError: true };
+      state.branches[newBranchName] = targetCommit;
     return {
       nextState: state,
       output: `Создана новая ветка "${newBranchName}" на коммите ${targetCommit}.`,
@@ -345,6 +350,7 @@ export function executeGitCommand(
         return { nextState: state, output: `Ошибка: коммит "${args[2]}" не найден.`, isError: true };
       }
 
+      if (Object.hasOwn(state.branches, newBranchName) || !/^[A-Za-z0-9][A-Za-z0-9/_-]*$/.test(newBranchName)) return { nextState: currentState, output: '???????????? ??? ??? ??????? ??? ?????.', isError: true };
       state.branches[newBranchName] = targetCommit;
       state.head = { type: 'branch', name: newBranchName };
       return {
@@ -399,7 +405,7 @@ export function executeGitCommand(
       return { nextState: state, output: `Ошибка: ветка или ссылка '${targetBranch}' не существует.`, isError: true };
     }
 
-    if (targetCommitId === currentCommitId) {
+    if (getAncestors(state.commits, currentCommitId).has(targetCommitId)) {
       return { nextState: state, output: 'Уже актуально (Already up to date).', isError: false };
     }
 
@@ -442,15 +448,49 @@ export function executeGitCommand(
 
   // 5. git rebase
   if (subCmd === 'rebase') {
+    if (args[0] === '--continue') {
+      const plan = state.rebasePlan;
+      const selected = args.slice(1);
+      if (!plan || !selected.length || new Set(selected).size !== selected.length || selected.some(id => !plan.commits.includes(id))) {
+        return { nextState: currentState, output: 'Укажите неповторяющиеся коммиты из плана: git rebase --continue C3 C5 C4', isError: true };
+      }
+      let parent = plan.base;
+      for (const id of selected) {
+        const copy = `C${++state.commitCounter}'`;
+        state.commits[copy] = { id: copy, sourceId: state.commits[id].sourceId || id.replace(/'+$/, ''), parentIds: [parent] };
+        parent = copy;
+      }
+      if (state.head.type === 'branch') state.branches[state.head.name] = parent;
+      else state.head.name = parent;
+      delete state.rebasePlan;
+      return { nextState: state, output: 'План rebase применён.', isError: false, commandType: 'rebase' };
+    }
     if (args.length === 0) {
       return { nextState: state, output: 'Ошибка: укажите целевую ветку для rebase: git rebase <ветка>', isError: true };
     }
 
     // Interactive rebase simulation: git rebase -i HEAD~N
     const isInteractive = args[0] === '-i';
+    if (!isInteractive && args[1]) {
+      if (!Object.hasOwn(state.branches, args[1])) return { nextState: currentState, output: 'Ветка не найдена.', isError: true };
+      state.head = { type: 'branch', name: args[1] };
+    }
     const targetRef = isInteractive ? args[1] : args[0];
     const targetCommitId = resolveRef(state, targetRef);
     const currentCommitId = getHeadCommitId(state);
+
+    if (isInteractive) {
+      if (!targetCommitId || !getAncestors(state.commits, currentCommitId).has(targetCommitId)) return { nextState: currentState, output: 'База rebase должна быть предком HEAD.', isError: true };
+      const commits: string[] = [];
+      let tip = currentCommitId;
+      while (tip !== targetCommitId) {
+        if (!state.commits[tip] || state.commits[tip].parentIds.length !== 1) return { nextState: currentState, output: 'Для интерактивного rebase нужна линейная история.', isError: true };
+        commits.unshift(tip);
+        tip = state.commits[tip].parentIds[0];
+      }
+      state.rebasePlan = { base: targetCommitId, commits };
+      return { nextState: state, output: `План: ${commits.join(' ')}. В тренажёре выберите порядок командой git rebase --continue <коммиты>. Пропущенные коммиты исключаются.`, isError: false, commandType: 'rebase' };
+    }
 
     if (!targetCommitId || !state.commits[targetCommitId]) {
       return { nextState: state, output: `Ошибка: ссылка '${targetRef}' не найдена.`, isError: true };
@@ -459,6 +499,8 @@ export function executeGitCommand(
     if (targetCommitId === currentCommitId) {
       return { nextState: state, output: 'Текущая ветка уже находится на вершине целевого коммита.', isError: false };
     }
+
+    if (getAncestors(state.commits, currentCommitId).has(targetCommitId)) return { nextState: state, output: 'Ветка уже основана на указанном коммите.', isError: false, commandType: 'rebase' };
 
     const commonAncestor = findCommonAncestor(state.commits, currentCommitId, targetCommitId);
     const commitsToReplay: string[] = [];
@@ -490,6 +532,7 @@ export function executeGitCommand(
       const rebasedId = `C${state.commitCounter}'`;
       state.commits[rebasedId] = {
         id: rebasedId,
+        sourceId: state.commits[oldCommitId].sourceId || oldCommitId.replace(/'+$/, ''),
         parentIds: [newParentId],
         message: `Rebased copy of ${oldCommitId}`
       };
@@ -531,6 +574,7 @@ export function executeGitCommand(
       const newId = `C${state.commitCounter}''`;
       state.commits[newId] = {
         id: newId,
+        sourceId: state.commits[sourceId].sourceId || sourceId.replace(/'+$/, ''),
         parentIds: [currentParent],
         message: `Cherry-picked from ${sourceId}`
       };
@@ -709,7 +753,8 @@ export function executeGitCommand(
 
   // 12. git fakeTeamwork
   if (subCmd === 'faketeamwork') {
-    const count = parseInt(args[0], 10) || 1;
+    const count = args[0] === undefined ? 1 : Number(args[0]);
+    if (!Number.isInteger(count) || count < 1 || count > 100) return { nextState: currentState, output: '????????? ?? 1 ?? 100 ????????.', isError: true };
     const remoteBranch = 'o/main';
     let currentRemoteTip = state.branches[remoteBranch] || getHeadCommitId(state);
 
@@ -821,40 +866,28 @@ export function executeGitCommand(
  * Checks if current Git state matches the goal Git state (topology, branch pointers, HEAD, tags).
  */
 export function isGitGoalReached(current: GitState, goal: GitState): boolean {
-  // 1. Check all goal branches exist in current
-  for (const branchName of Object.keys(goal.branches)) {
-    if (!current.branches[branchName]) return false;
+  if (current.rebasePlan || current.head.type !== goal.head.type) return false;
+  if (current.head.type === 'branch' && current.head.name !== goal.head.name) return false;
+  if (Object.keys(current.commits).length < Object.keys(goal.commits).length) return false;
+  const forward = new Map<string, string>();
+  const reverse = new Map<string, string>();
+  const match = (actualId: string, expectedId: string): boolean => {
+    if (forward.has(expectedId)) return forward.get(expectedId) === actualId;
+    if (reverse.has(actualId)) return false;
+    const actual = current.commits[actualId], expected = goal.commits[expectedId];
+    if (!actual || !expected) return false;
+    const origin = (c: GitCommit) => c.sourceId || c.id.replace(/'+$/, '');
+    if (origin(actual) !== origin(expected) || actual.parentIds.length !== expected.parentIds.length) return false;
+    // A rewritten commit must not be confused with its original, even if its parents match.
+    if (Boolean(actual.sourceId || /'$/.test(actual.id)) !== Boolean(expected.sourceId || /'$/.test(expected.id))) return false;
+    forward.set(expectedId, actualId); reverse.set(actualId, expectedId);
+    return expected.parentIds.every((parent, index) => match(actual.parentIds[index], parent));
+  };
+  for (const [name, tip] of Object.entries(goal.branches)) {
+    if (!Object.hasOwn(current.branches, name) || !match(current.branches[name], tip)) return false;
   }
-
-  // 2. Check tags if goal has them
-  if (goal.tags && Object.keys(goal.tags).length > 0) {
-    if (!current.tags) return false;
-    for (const tagName of Object.keys(goal.tags)) {
-      if (!current.tags[tagName]) return false;
-    }
+  for (const [name, tip] of Object.entries(goal.tags || {})) {
+    if (!current.tags || !Object.hasOwn(current.tags, name) || !match(current.tags[name], tip)) return false;
   }
-
-  // 3. Check HEAD target match
-  if (goal.head.type !== current.head.type) return false;
-  if (goal.head.type === 'branch' && goal.head.name !== current.head.name) return false;
-
-  // 4. Check commit count or graph structure
-  const currentCommitsCount = Object.keys(current.commits).length;
-  const goalCommitsCount = Object.keys(goal.commits).length;
-
-  if (currentCommitsCount !== goalCommitsCount) return false;
-
-  // 5. Verify branch tips match relative to commit parent structures
-  for (const branch of Object.keys(goal.branches)) {
-    const curTip = current.branches[branch];
-    const goalTip = goal.branches[branch];
-    if (!curTip || !goalTip) return false;
-
-    const curCommit = current.commits[curTip];
-    const goalCommit = goal.commits[goalTip];
-    if (!curCommit || !goalCommit) return false;
-    if (curCommit.parentIds.length !== goalCommit.parentIds.length) return false;
-  }
-
-  return true;
+  return match(getHeadCommitId(current), getHeadCommitId(goal));
 }

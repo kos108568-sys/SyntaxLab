@@ -1,4 +1,4 @@
-import { createInitialGitState, type GitState } from '../services/gitEngine';
+import { createInitialGitState, type GitState } from '../services/gitEngine.ts';
 
 export interface GitLevel {
   id: string;
@@ -295,6 +295,7 @@ lvl4_2_init.commitCounter = 3;
 
 const lvl4_2_goal = createInitialGitState();
 lvl4_2_goal.commits = {
+  ...lvl4_2_init.commits,
   C0: { id: 'C0', parentIds: [], isRoot: true },
   C1: { id: 'C1', parentIds: ['C0'] },
   "C2'": { id: "C2'", parentIds: ['C1'] },
@@ -368,13 +369,13 @@ const lvl5_1_goal = createInitialGitState();
 lvl5_1_goal.commits = {
   C0: { id: 'C0', parentIds: [], isRoot: true },
   C1: { id: 'C1', parentIds: ['C0'] },
-  "C2'": { id: "C2'", parentIds: ['C1'] },
-  "C3'": { id: "C3'", parentIds: ["C2'"] },
-  "C4'": { id: "C4'", parentIds: ["C3'"] },
+  C2: { id: 'C2', parentIds: ['C1'] },
+  C3: { id: 'C3', parentIds: ['C2'] },
+  "C4'": { id: "C4'", parentIds: ["C3"] },
   "C5'": { id: "C5'", parentIds: ["C4'"] },
   "C6'": { id: "C6'", parentIds: ["C5'"] }
 };
-lvl5_1_goal.branches = { main: "C6'", bugFix: "C3'", side: "C5'", another: "C6'" };
+lvl5_1_goal.branches = { main: "C6'", bugFix: "C3", side: "C5'", another: "C6'" };
 lvl5_1_goal.head = { type: 'branch', name: 'main' };
 lvl5_1_goal.commitCounter = 12;
 
@@ -774,7 +775,7 @@ export const GIT_LEVELS: GitLevel[] = [
     hint: 'Выполните "git rebase -i HEAD~4", чтобы переупорядочить коммиты.',
     initialState: lvl3_2_init,
     goalState: lvl3_2_goal,
-    solutionHint: ['git rebase -i HEAD~4']
+    solutionHint: ['git rebase -i HEAD~4', 'git rebase --continue C3 C5 C4']
   },
 
   // --- 4. СБОРНАЯ СОЛЯНКА ---
@@ -820,7 +821,7 @@ export const GIT_LEVELS: GitLevel[] = [
     hint: 'Выполните "git rebase -i HEAD~2", чтобы переставить коммиты.',
     initialState: lvl4_2_init,
     goalState: lvl4_2_goal,
-    solutionHint: ['git rebase -i HEAD~2']
+    solutionHint: ['git rebase -i HEAD~2', 'git rebase --continue C2 C3']
   },
   {
     id: 'mixed4',
@@ -956,7 +957,7 @@ export const GIT_LEVELS: GitLevel[] = [
     hint: 'Выполните коммит и исследуйте разделение веток.',
     initialState: lvl6_2_init,
     goalState: lvl6_2_goal,
-    solutionHint: ['git commit', 'git checkout C1']
+    solutionHint: ['git commit', 'git checkout C1', 'git branch -f main C1']
   },
   {
     id: 'rem3',
