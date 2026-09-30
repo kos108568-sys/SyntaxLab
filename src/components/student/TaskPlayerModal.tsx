@@ -339,7 +339,7 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl my-auto shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl my-auto shadow-2xl flex flex-col h-[95vh] max-h-[920px] overflow-hidden">
         
         {/* Player Header */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
@@ -401,7 +401,7 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
         )}
 
         {/* Content Body: Split View */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
           
           {/* Left Column: Theory & Instructions (5 cols) */}
           <div className="lg:col-span-5 p-4 sm:p-6 border-b lg:border-b-0 lg:border-r border-slate-800 overflow-y-auto space-y-4 bg-slate-900/60">
@@ -487,7 +487,7 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
           </div>
 
           {/* Right Column: Code Editor or Quiz (7 cols) */}
-          <div className="lg:col-span-7 flex flex-col overflow-hidden bg-slate-950">
+          <div className="lg:col-span-7 min-h-0 flex flex-col overflow-hidden bg-slate-950">
             
             {/* Editor Toolbar */}
             {task.type !== 'quiz' && (
@@ -514,14 +514,14 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
 
             {/* Task Type: Code Challenge or Bug Hunt */}
             {task.type !== 'quiz' ? (
-              <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                 {usesHostedCsharpEditor ? (
-                  <div className="flex-1 min-h-[440px] bg-slate-950">
+                  <div className="flex-1 min-h-0 bg-slate-950">
                     <iframe
                       key={task.id}
                       src={`https://coddy.tech/embed-editor?lang=csharp&theme=dark&layout=stacked&code=${toUrlSafeBase64(code)}`}
                       title={`C# editor: ${task.title}`}
-                      className="h-full min-h-[440px] w-full border-0"
+                      className="h-full min-h-0 w-full border-0"
                       allow="clipboard-read; clipboard-write"
                     />
                   </div>
