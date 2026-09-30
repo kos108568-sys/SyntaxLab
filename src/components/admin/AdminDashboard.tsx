@@ -32,7 +32,12 @@ import {
   Trash2,
   FolderPlus,
   GraduationCap,
-  GitBranch
+  GitBranch,
+  ChevronDown,
+  ChevronUp,
+  Lock,
+  Unlock,
+  SlidersHorizontal
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -47,7 +52,10 @@ export const AdminDashboard: React.FC = () => {
     isSupabaseConnected,
     availableCourses,
     groupCourseAccess,
-    toggleCourseForGroup
+    toggleCourseForGroup,
+    groupModuleAccess,
+    toggleModuleForGroup,
+    toggleAllModulesForGroup
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'radar' | 'students' | 'curriculum' | 'gradebook' | 'database'>('radar');
@@ -55,6 +63,7 @@ export const AdminDashboard: React.FC = () => {
   const [helpCommentInput, setHelpCommentInput] = useState('');
   const [newAnnouncement, setNewAnnouncement] = useState('');
   const [fixSqlCopied, setFixSqlCopied] = useState(false);
+  const [expandedModulesGroup, setExpandedModulesGroup] = useState<Record<string, boolean>>({});
 
   // Groups and Students Moderation state
   const [academicGroups, setAcademicGroups] = useState<string[]>(['ИТ-301', 'ИТ-302', 'ПИ-201']);
@@ -894,6 +903,93 @@ end $$;`;
                         );
                       })}
                     </div>
+
+                    {/* Module (Section) Access Controls */}
+                    {allowedCourses.includes('csharp-foundations') && course && (
+                      <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <SlidersHorizontal className="w-3 h-3 text-indigo-400" />
+                            Разделы C#:
+                          </span>
+                          {(() => {
+                            const allowedModIds = groupModuleAccess[group] || [];
+                            const openCount = course.modules.filter(m => allowedModIds.includes(m.id)).length;
+                            const isExpanded = !!expandedModulesGroup[group];
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedModulesGroup(prev => ({ ...prev, [group]: !prev[group] }))}
+                                className="text-[11px] text-indigo-400 hover:text-indigo-300 font-mono flex items-center gap-1 transition-colors"
+                              >
+                                <span>{openCount}/{course.modules.length} открыто</span>
+                                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              </button>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Quick action buttons */}
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleAllModulesForGroup(group, 'csharp-foundations', course.modules.map(m => m.id), true)}
+                            className="px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 transition-all flex items-center gap-1"
+                          >
+                            <Unlock className="w-2.5 h-2.5" />
+                            Открыть все
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleAllModulesForGroup(group, 'csharp-foundations', course.modules.map(m => m.id), false)}
+                            className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/60 transition-all flex items-center gap-1"
+                          >
+                            <Lock className="w-2.5 h-2.5" />
+                            Закрыть все
+                          </button>
+                        </div>
+
+                        {/* Module list */}
+                        {expandedModulesGroup[group] && (
+                          <div className="space-y-1 pt-1.5 max-h-56 overflow-y-auto pr-1">
+                            {course.modules.map((mod) => {
+                              const isModOpen = (groupModuleAccess[group] || []).includes(mod.id);
+                              const totalTasks = mod.lessons.reduce((acc, l) => acc + l.tasks.length, 0);
+                              return (
+                                <label
+                                  key={mod.id}
+                                  className={`flex items-center justify-between gap-2 p-1.5 rounded-lg border text-xs cursor-pointer select-none transition-all ${
+                                    isModOpen
+                                      ? 'bg-indigo-950/30 border-indigo-500/30 text-slate-200 hover:border-indigo-500/50'
+                                      : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:text-slate-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 truncate">
+                                    <input
+                                      type="checkbox"
+                                      checked={isModOpen}
+                                      onChange={(e) => toggleModuleForGroup(group, mod.id, 'csharp-foundations', e.target.checked)}
+                                      className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-0 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                    />
+                                    <span className="truncate text-[11px] font-medium">
+                                      {mod.title.replace('Модуль ', 'М')}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span className="text-[10px] font-mono text-slate-500">{totalTasks} зад.</span>
+                                    {isModOpen ? (
+                                      <span className="w-2 h-2 rounded-full bg-emerald-400" title="Раздел открыт для группы" />
+                                    ) : (
+                                      <span className="w-2 h-2 rounded-full bg-slate-600" title="Раздел закрыт для группы" />
+                                    )}
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1078,9 +1174,28 @@ end $$;`;
                       <p className="text-xs text-slate-400">{mod.description}</p>
                     </div>
                   </div>
-                  <span className="text-xs text-slate-400 font-mono">
-                    {mod.lessons.length} {mod.lessons.length === 1 ? 'урок' : 'урока'}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-400 font-mono">
+                      {mod.lessons.length} {mod.lessons.length === 1 ? 'урок' : 'урока'}
+                    </span>
+                    {(() => {
+                      const openForGroups = academicGroups.filter(g => (groupModuleAccess[g] || []).includes(mod.id));
+                      return openForGroups.length === academicGroups.length ? (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          Открыт всем группам
+                        </span>
+                      ) : openForGroups.length > 0 ? (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                          Открыт: {openForGroups.join(', ')}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                          <Lock className="w-2.5 h-2.5" />
+                          Закрыт для всех
+                        </span>
+                      );
+                    })()}
+                  </div>
                 </div>
 
                 <div className="divide-y divide-slate-800/60 p-2">

@@ -92,6 +92,24 @@ create table if not exists public.classroom_sessions (
   last_ping_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- 8. ДОСТУП ГРУПП К КУРСАМ И РАЗДЕЛАМ (МОДУЛЯМ)
+create table if not exists public.group_courses (
+  id uuid default gen_random_uuid() primary key,
+  group_name text not null,
+  course_id text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(group_name, course_id)
+);
+
+create table if not exists public.group_modules (
+  id uuid default gen_random_uuid() primary key,
+  group_name text not null,
+  module_id text not null,
+  course_id text not null default 'csharp-foundations',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(group_name, module_id)
+);
+
 -- ====================================================================
 -- ROW LEVEL SECURITY (RLS) ПОЛИТИКИ
 -- ====================================================================
@@ -103,6 +121,14 @@ alter table public.lessons enable row level security;
 alter table public.tasks enable row level security;
 alter table public.student_progress enable row level security;
 alter table public.classroom_sessions enable row level security;
+alter table public.group_courses enable row level security;
+alter table public.group_modules enable row level security;
+
+create policy "Group courses readable by all" on public.group_courses for select using (true);
+create policy "Group courses editable by teachers" on public.group_courses for all using (true);
+
+create policy "Group modules readable by all" on public.group_modules for select using (true);
+create policy "Group modules editable by teachers" on public.group_modules for all using (true);
 
 -- Профили: каждый видит всех в своей группе, обновляет свой
 create policy "Profiles visible to authenticated users"

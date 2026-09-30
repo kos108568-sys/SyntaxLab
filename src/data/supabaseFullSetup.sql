@@ -47,6 +47,33 @@ insert into public.group_courses (group_name, course_id) values
   ('ПИ-201', 'git-branching')
 on conflict (group_name, course_id) do nothing;
 
+-- 1.3 ТАБЛИЦА ДОСТУПА ГРУПП К РАЗДЕЛАМ (МОДУЛЯМ) КУРСА
+create table if not exists public.group_modules (
+  id uuid default gen_random_uuid() primary key,
+  group_name text not null,
+  module_id text not null,
+  course_id text not null default 'csharp-foundations',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(group_name, module_id)
+);
+
+-- По умолчанию открываем модули для групп
+insert into public.group_modules (group_name, module_id, course_id) values
+  ('ИТ-301', 'mod-1', 'csharp-foundations'),
+  ('ИТ-301', 'mod-2', 'csharp-foundations'),
+  ('ИТ-301', 'mod-3', 'csharp-foundations'),
+  ('ИТ-301', 'mod-4', 'csharp-foundations'),
+  ('ИТ-301', 'mod-5', 'csharp-foundations'),
+  ('ИТ-301', 'mod-6', 'csharp-foundations'),
+  ('ИТ-301', 'mod-7', 'csharp-foundations'),
+  ('ИТ-301', 'mod-8', 'csharp-foundations'),
+  ('ИТ-302', 'mod-1', 'csharp-foundations'),
+  ('ИТ-302', 'mod-2', 'csharp-foundations'),
+  ('ИТ-302', 'mod-3', 'csharp-foundations'),
+  ('ПИ-201', 'mod-1', 'csharp-foundations'),
+  ('ПИ-201', 'mod-2', 'csharp-foundations')
+on conflict (group_name, module_id) do nothing;
+
 
 -- 2. ТАБЛИЦА КУРСОВ
 create table if not exists public.courses (
@@ -279,6 +306,14 @@ create policy "Group courses readable by all" on public.group_courses for select
 drop policy if exists "Group courses editable by teachers" on public.group_courses;
 create policy "Group courses editable by teachers" on public.group_courses for all using (true);
 
+-- Доступ групп к разделам (модулям)
+alter table public.group_modules enable row level security;
+drop policy if exists "Group modules readable by all" on public.group_modules;
+create policy "Group modules readable by all" on public.group_modules for select using (true);
+
+drop policy if exists "Group modules editable by teachers" on public.group_modules;
+create policy "Group modules editable by teachers" on public.group_modules for all using (true);
+
 drop policy if exists "Courses are readable by everyone" on public.courses;
 create policy "Courses are readable by everyone" on public.courses for select using (true);
 
@@ -350,14 +385,17 @@ values (
   '12.0 (.NET 8)'
 ) on conflict (id) do nothing;
 
--- Модуль 1
+-- Все 8 модулей курса C#
 insert into public.modules (id, course_id, title, order_index, description, icon_name)
 values
   ('mod-1', 'csharp-foundations', 'Модуль 1: Базовый синтаксис, переменные и типы данных', 1, 'Точка входа в программу, строгая типизация, консольный ввод/вывод и интерполяция строк.', 'Terminal'),
-  ('mod-2', 'csharp-foundations', 'Модуль 2: Управляющие конструкции и циклы', 2, 'Условия if-else, switch выражения в C# 9+, циклы for, while и break/continue.', 'GitBranch'),
-  ('mod-3', 'csharp-foundations', 'Модуль 3: Массивы и обобщенные коллекции List<T>', 3, 'Хранение наборов данных, перебор через foreach, работа с динамическими списками.', 'Layers'),
-  ('mod-4', 'csharp-foundations', 'Модуль 4: Классы, свойства и основы ООП', 4, 'Инкапсуляция, автоматические свойства { get; set; }, конструкторы и создание экземпляров.', 'Box'),
-  ('mod-5', 'csharp-foundations', 'Модуль 5: LINQ (Language Integrated Query)', 5, 'Функциональный подход к коллекциям: Where, Select, OrderBy, Sum и Count.', 'Cpu')
+  ('mod-2', 'csharp-foundations', 'Модуль 2: Управляющие конструкции и ветвления', 2, 'Условия if-else, switch выражения в C# 9+, реляционные паттерны и тернарный оператор.', 'GitBranch'),
+  ('mod-3', 'csharp-foundations', 'Модуль 3: Циклы и алгоритмы итераций', 3, 'Циклы for, while, do-while, алгоритмы накопления, break и continue.', 'Layers'),
+  ('mod-4', 'csharp-foundations', 'Модуль 4: Методы и функции (Декомпозиция программ)', 4, 'Статические методы, параметры, возврат значений, перегрузка и модификаторы out/ref.', 'Box'),
+  ('mod-5', 'csharp-foundations', 'Модуль 5: Массивы и работа со строками', 5, 'Одномерные массивы, foreach, индексы ^1, срезы диапазонов .., методы string и StringBuilder.', 'Layers'),
+  ('mod-6', 'csharp-foundations', 'Модуль 6: Динамические коллекции List<T> и Dictionary', 6, 'Обобщенные коллекции System.Collections.Generic: динамические списки и быстрый поиск по ключу.', 'Layers'),
+  ('mod-7', 'csharp-foundations', 'Модуль 7: Классы, свойства и основы ООП', 7, 'Инкапсуляция, автоматические свойства { get; set; }, валидация, конструкторы и наследование.', 'Box'),
+  ('mod-8', 'csharp-foundations', 'Модуль 8: LINQ (Language Integrated Query)', 8, 'Функциональный подход к коллекциям: Where, Select, OrderBy, Sum и Count.', 'Cpu')
 on conflict (id) do nothing;
 
 -- Уроки

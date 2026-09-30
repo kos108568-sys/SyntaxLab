@@ -11,7 +11,10 @@ import {
   updateSessionInDb,
   sendTeacherHintToDb,
   loadGroupCourseAccess,
-  toggleGroupCourseAccess
+  toggleGroupCourseAccess,
+  loadGroupModuleAccess,
+  toggleGroupModuleAccess,
+  toggleAllGroupModules
 } from '../services/supabaseService';
 
 export interface CourseMeta {
@@ -67,12 +70,15 @@ interface AppContextType {
   selectedStudentId: string;
   setSelectedStudentId: (id: string) => void;
 
-  // Course Access & Switching
+  // Course & Module Access & Switching
   activeCourseId: string;
   setActiveCourseId: (id: string) => void;
   availableCourses: CourseMeta[];
   groupCourseAccess: Record<string, string[]>;
   toggleCourseForGroup: (groupName: string, courseId: string, enabled: boolean) => Promise<void>;
+  groupModuleAccess: Record<string, string[]>;
+  toggleModuleForGroup: (groupName: string, moduleId: string, courseId: string, enabled: boolean) => Promise<void>;
+  toggleAllModulesForGroup: (groupName: string, courseId: string, moduleIds: string[], enabled: boolean) => Promise<void>;
   userAllowedCourses: CourseMeta[];
   
   // Progress
@@ -131,6 +137,24 @@ const DEFAULT_GROUP_ACCESS: Record<string, string[]> = {
   'ПО-43': ['git-branching', 'csharp-foundations']
 };
 
+export const ALL_MODULE_IDS = [
+  'mod-1',
+  'mod-2',
+  'mod-3',
+  'mod-4',
+  'mod-5',
+  'mod-6',
+  'mod-7',
+  'mod-8'
+];
+
+const DEFAULT_GROUP_MODULE_ACCESS: Record<string, string[]> = {
+  'ИТ-301': [...ALL_MODULE_IDS],
+  'ИТ-302': ['mod-1', 'mod-2', 'mod-3'],
+  'ПИ-201': ['mod-1', 'mod-2'],
+  'ПО-43': [...ALL_MODULE_IDS]
+};
+
 const getInitialSession = (): Session | null => {
   if (typeof window === 'undefined' || !window.localStorage) return null;
   try {
@@ -171,6 +195,15 @@ const getInitialGroupAccess = (): Record<string, string[]> => {
     if (raw) return JSON.parse(raw);
   } catch {}
   return DEFAULT_GROUP_ACCESS;
+};
+
+const getInitialGroupModuleAccess = (): Record<string, string[]> => {
+  if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_GROUP_MODULE_ACCESS;
+  try {
+    const raw = localStorage.getItem('syntaxlab_cached_group_module_access');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return DEFAULT_GROUP_MODULE_ACCESS;
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -223,6 +256,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return next;
     });
     await toggleGroupCourseAccess(groupName, courseId, enabled);
+  };
+
+  const [groupModuleAccess, setGroupModuleAccess] = useState<Record<string, string[]>>(() => getInitialGroupModuleAccess());
+
+  // Toggle module access per group
+  const toggleModuleForGroup = async (groupName: string, moduleId: string, courseId: string, enabled: boolean) => {
+    setGroupModuleAccess(prev => {
+      const current = prev[groupName] || [];
+      const updated = enabled 
+        ? (current.includes(moduleId) ? current : [...current, moduleId])
+        : current.filter(id => id !== moduleId);
+      const next = { ...prev, [groupName]: updated };
+      try {
+        localStorage.setItem('syntaxlab_cached_group_module_access', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    await toggleGroupModuleAccess(groupName, moduleId, courseId, enabled);
+  };
+
+  // Toggle all modules for group
+  const toggleAllModulesForGroup = async (groupName: string, courseId: string, moduleIds: string[], enabled: boolean) => {
+    setGroupModuleAccess(prev => {
+      const current = prev[groupName] || [];
+      const updated = enabled
+        ? Array.from(new Set([...current, ...moduleIds]))
+        : current.filter(id => !moduleIds.includes(id));
+      const next = { ...prev, [groupName]: updated };
+      try {
+        localStorage.setItem('syntaxlab_cached_group_module_access', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    await toggleAllGroupModules(groupName, courseId, moduleIds, enabled);
   };
 
   // Determine allowed courses for current user
@@ -334,7 +401,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // Параллельная загрузка всех данных для мгновенного отклика
-      const [dbCourse, dbSessions, profRes, progressRes, groupAccess] = await Promise.all([
+      const [dbCourse, dbSessions, profRes, progressRes, groupAccess, groupModules] = await Promise.all([
         loadCourseFromSupabase('csharp-foundations').catch(err => {
           console.warn('Error loading course:', err);
           return null;
@@ -352,11 +419,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loadGroupCourseAccess().catch(err => {
           console.warn('Error loading group access:', err);
           return null;
+        }),
+        loadGroupModuleAccess().catch(err => {
+          console.warn('Error loading group modules:', err);
+          return null;
         })
       ]);
 
-      if (dbCourse) {
+      if (dbCourse && dbCourse.modules && dbCourse.modules.length >= initialCsharpCourse.modules.length) {
         setCourse(dbCourse);
+      } else {
+        setCourse(initialCsharpCourse);
       }
 
       if (dbSessions) {
@@ -398,6 +471,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setGroupCourseAccess(groupAccess);
         try {
           localStorage.setItem('syntaxlab_cached_group_access', JSON.stringify(groupAccess));
+        } catch {}
+      }
+
+      // Загрузка прав доступа групп к разделам (модулям)
+      if (groupModules && Object.keys(groupModules).length > 0) {
+        setGroupModuleAccess(groupModules);
+        try {
+          localStorage.setItem('syntaxlab_cached_group_module_access', JSON.stringify(groupModules));
         } catch {}
       }
     } catch (err) {
@@ -592,6 +673,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         availableCourses: ALL_COURSES,
         groupCourseAccess,
         toggleCourseForGroup,
+        groupModuleAccess,
+        toggleModuleForGroup,
+        toggleAllModulesForGroup,
         userAllowedCourses,
         completedTaskIds,
         completeTask,

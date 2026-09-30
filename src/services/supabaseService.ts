@@ -501,3 +501,106 @@ export async function toggleGroupCourseAccess(
   }
 }
 
+// 15. Загрузка доступа групп к разделам (модулям)
+export async function loadGroupModuleAccess(): Promise<Record<string, string[]>> {
+  if (!isSupabaseConfigured) {
+    return {
+      'ИТ-301': ['mod-1', 'mod-2', 'mod-3', 'mod-4', 'mod-5', 'mod-6', 'mod-7', 'mod-8'],
+      'ИТ-302': ['mod-1', 'mod-2', 'mod-3'],
+      'ПИ-201': ['mod-1', 'mod-2'],
+      'ПО-43': ['mod-1', 'mod-2', 'mod-3', 'mod-4', 'mod-5', 'mod-6', 'mod-7', 'mod-8']
+    };
+  }
+  try {
+    const { data, error } = await supabase
+      .from('group_modules')
+      .select('group_name, module_id');
+
+    if (error || !data) {
+      return {
+        'ИТ-301': ['mod-1', 'mod-2', 'mod-3', 'mod-4', 'mod-5', 'mod-6', 'mod-7', 'mod-8'],
+        'ИТ-302': ['mod-1', 'mod-2', 'mod-3'],
+        'ПИ-201': ['mod-1', 'mod-2'],
+        'ПО-43': ['mod-1', 'mod-2', 'mod-3', 'mod-4', 'mod-5', 'mod-6', 'mod-7', 'mod-8']
+      };
+    }
+
+    const mapping: Record<string, string[]> = {};
+    for (const item of data) {
+      if (!mapping[item.group_name]) {
+        mapping[item.group_name] = [];
+      }
+      mapping[item.group_name].push(item.module_id);
+    }
+    return mapping;
+  } catch (err) {
+    console.warn('Error loading group_modules:', err);
+    return {};
+  }
+}
+
+// 16. Переключение доступа группы к конкретному разделу (модулю)
+export async function toggleGroupModuleAccess(
+  groupName: string,
+  moduleId: string,
+  courseId = 'csharp-foundations',
+  enabled: boolean
+): Promise<boolean> {
+  if (!isSupabaseConfigured) return true;
+  try {
+    if (enabled) {
+      const { error } = await supabase
+        .from('group_modules')
+        .upsert(
+          { group_name: groupName, module_id: moduleId, course_id: courseId },
+          { onConflict: 'group_name,module_id' }
+        );
+      return !error;
+    } else {
+      const { error } = await supabase
+        .from('group_modules')
+        .delete()
+        .eq('group_name', groupName)
+        .eq('module_id', moduleId);
+      return !error;
+    }
+  } catch (err) {
+    console.error('Error toggling group module access:', err);
+    return false;
+  }
+}
+
+// 17. Открытие или закрытие всех разделов для группы разом
+export async function toggleAllGroupModules(
+  groupName: string,
+  courseId: string,
+  moduleIds: string[],
+  enabled: boolean
+): Promise<boolean> {
+  if (!isSupabaseConfigured) return true;
+  try {
+    if (enabled) {
+      const rows = moduleIds.map(mId => ({
+        group_name: groupName,
+        module_id: mId,
+        course_id: courseId
+      }));
+      const { error } = await supabase
+        .from('group_modules')
+        .upsert(rows, { onConflict: 'group_name,module_id' });
+      return !error;
+    } else {
+      const { error } = await supabase
+        .from('group_modules')
+        .delete()
+        .eq('group_name', groupName)
+        .in('module_id', moduleIds);
+      return !error;
+    }
+  } catch (err) {
+    console.error('Error toggling all group modules:', err);
+    return false;
+  }
+}
+
+
