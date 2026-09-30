@@ -1,14 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import type { Course, UserProfile, UserRole, Task } from '../types';
+import type { Course, UserProfile, UserRole, Task, TelemetryEvent } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { initialCsharpCourse } from '../data/csharpCourse';
+import { initialCsharpCourse, sampleStudents } from '../data/csharpCourse';
 import {
   loadCourseFromSupabase,
   loadClassroomSessionsFromDb,
   subscribeToClassroomRealtime,
   saveProgressToDb,
   updateSessionInDb,
+  updateSessionTelemetryInDb,
   sendTeacherHintToDb,
   loadGroupCourseAccess,
   toggleGroupCourseAccess,
@@ -57,6 +58,18 @@ export interface ClassroomStudentState {
   streakDays: number;
   lastActive: string;
   teacherComment?: string;
+  // Полная телеметрия и античит прокторинг
+  tabSwitchCount: number;
+  totalAwaySeconds: number;
+  pasteCount: number;
+  pastedCharsTotal: number;
+  isCurrentlyAway: boolean;
+  totalErrorsCount: number;
+  totalAttemptsCount: number;
+  completedTasksCount: number;
+  lastCodeSnippet?: string;
+  lastErrorMessage?: string;
+  eventsLog: TelemetryEvent[];
 }
 
 interface AppContextType {
@@ -85,9 +98,10 @@ interface AppContextType {
   completedTaskIds: string[];
   completeTask: (taskId: string, xpEarned: number) => void;
   
-  // Student Actions
+  // Student Actions & Telemetry
   requestTeacherHelp: (message: string) => void;
   reportTaskAttempt: (taskId: string, success: boolean) => void;
+  recordStudentTelemetry: (event: TelemetryEvent, dataUpdate?: Partial<ClassroomStudentState>) => void;
   
   // Teacher Actions
   sendHelpResponse: (studentId: string, comment: string) => void;
@@ -206,6 +220,19 @@ const getInitialGroupModuleAccess = (): Record<string, string[]> => {
   return DEFAULT_GROUP_MODULE_ACCESS;
 };
 
+const getInitialClassroomStudents = (): ClassroomStudentState[] => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const saved = localStorage.getItem('syntaxlab_cached_classroom_sessions');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+  }
+  return sampleStudents as unknown as ClassroomStudentState[];
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(() => getInitialSession());
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getInitialUser());
@@ -237,7 +264,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [groupCourseAccess, setGroupCourseAccess] = useState<Record<string, string[]>>(() => getInitialGroupAccess());
   const [course, setCourse] = useState<Course | null>(initialCsharpCourse);
-  const [studentsInClass, setStudentsInClass] = useState<ClassroomStudentState[]>([]);
+  const [studentsInClass, setStudentsInClass] = useState<ClassroomStudentState[]>(() => getInitialClassroomStudents());
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
   const [broadcastMessage, setBroadcastMessage] = useState<string | null>(null);
@@ -432,8 +459,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCourse(initialCsharpCourse);
       }
 
-      if (dbSessions) {
+      if (dbSessions && dbSessions.length > 0) {
         setStudentsInClass(dbSessions);
+      } else {
+        setStudentsInClass(prev => prev.length > 0 ? prev : (sampleStudents as unknown as ClassroomStudentState[]));
       }
 
       // Проверяем актуальный статус профиля
@@ -618,6 +647,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const recordStudentTelemetry = useCallback((event: TelemetryEvent, dataUpdate?: Partial<ClassroomStudentState>) => {
+    const studentId = currentUser?.id || 'live-current-student';
+
+    setStudentsInClass(prev => {
+      const idx = prev.findIndex(s => s.id === studentId);
+      const student = idx >= 0 ? prev[idx] : null;
+
+      const updatedStudent: ClassroomStudentState = student ? {
+        ...student,
+        ...dataUpdate,
+        eventsLog: [event, ...(student.eventsLog || [])].slice(0, 50),
+        tabSwitchCount: (dataUpdate?.tabSwitchCount !== undefined) ? dataUpdate.tabSwitchCount : student.tabSwitchCount,
+        totalAwaySeconds: (dataUpdate?.totalAwaySeconds !== undefined) ? dataUpdate.totalAwaySeconds : student.totalAwaySeconds,
+        pasteCount: (dataUpdate?.pasteCount !== undefined) ? dataUpdate.pasteCount : student.pasteCount,
+        pastedCharsTotal: (dataUpdate?.pastedCharsTotal !== undefined) ? dataUpdate.pastedCharsTotal : student.pastedCharsTotal,
+        isCurrentlyAway: (dataUpdate?.isCurrentlyAway !== undefined) ? dataUpdate.isCurrentlyAway : student.isCurrentlyAway,
+        totalErrorsCount: (dataUpdate?.totalErrorsCount !== undefined) ? dataUpdate.totalErrorsCount : student.totalErrorsCount,
+        totalAttemptsCount: (dataUpdate?.totalAttemptsCount !== undefined) ? dataUpdate.totalAttemptsCount : student.totalAttemptsCount,
+        completedTasksCount: (dataUpdate?.completedTasksCount !== undefined) ? dataUpdate.completedTasksCount : student.completedTasksCount,
+        lastCodeSnippet: dataUpdate?.lastCodeSnippet || student.lastCodeSnippet,
+        lastErrorMessage: dataUpdate?.lastErrorMessage || student.lastErrorMessage,
+        lastActive: new Date().toLocaleTimeString()
+      } : {
+        id: studentId,
+        fullName: currentUser?.fullName || 'Студент',
+        avatarUrl: currentUser?.avatarUrl,
+        email: currentUser?.email || 'student@university.edu',
+        groupName: currentUser?.groupName || 'ИТ-301',
+        currentTaskId: event.taskId || '',
+        currentTaskTitle: event.taskTitle || '',
+        currentLessonTitle: '',
+        status: dataUpdate?.status || 'active',
+        attemptsOnCurrentTask: 1,
+        timeOnCurrentTaskMinutes: 1,
+        needsHelp: false,
+        totalXp: currentUser?.totalXp || 0,
+        streakDays: currentUser?.currentStreakDays || 1,
+        lastActive: new Date().toLocaleTimeString(),
+        tabSwitchCount: dataUpdate?.tabSwitchCount || 0,
+        totalAwaySeconds: dataUpdate?.totalAwaySeconds || 0,
+        pasteCount: dataUpdate?.pasteCount || 0,
+        pastedCharsTotal: dataUpdate?.pastedCharsTotal || 0,
+        isCurrentlyAway: dataUpdate?.isCurrentlyAway || false,
+        totalErrorsCount: dataUpdate?.totalErrorsCount || 0,
+        totalAttemptsCount: dataUpdate?.totalAttemptsCount || 0,
+        completedTasksCount: dataUpdate?.completedTasksCount || 0,
+        lastCodeSnippet: dataUpdate?.lastCodeSnippet,
+        lastErrorMessage: dataUpdate?.lastErrorMessage,
+        eventsLog: [event]
+      };
+
+      const next = idx >= 0
+        ? [...prev.slice(0, idx), updatedStudent, ...prev.slice(idx + 1)]
+        : [...prev, updatedStudent];
+
+      try {
+        localStorage.setItem('syntaxlab_cached_classroom_sessions', JSON.stringify(next));
+      } catch {}
+
+      return next;
+    });
+
+    if (isSupabaseConfigured && currentUser?.id) {
+      updateSessionTelemetryInDb(currentUser.id, event, dataUpdate);
+    }
+  }, [currentUser]);
+
   const requestTeacherHelp = (message: string) => {
     if (currentUser?.id) {
       updateSessionInDb(currentUser.id, currentUser.currentTaskId || 'task-1-1-1', 'stuck', true, message);
@@ -681,6 +777,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         completeTask,
         requestTeacherHelp,
         reportTaskAttempt,
+        recordStudentTelemetry,
         sendHelpResponse,
         clearStuckStatus,
         addNewTask,

@@ -165,7 +165,18 @@ export async function loadClassroomSessionsFromDb(groupName = 'ИТ-301'): Promi
       teacherComment: row.teacher_comment,
       totalXp: row.profiles?.total_xp || 0,
       streakDays: row.profiles?.streak_days || 0,
-      lastActive: new Date(row.last_ping_at).toLocaleTimeString()
+      lastActive: new Date(row.last_ping_at).toLocaleTimeString(),
+      tabSwitchCount: row.tab_switch_count || 0,
+      totalAwaySeconds: row.total_away_seconds || 0,
+      pasteCount: row.paste_count || 0,
+      pastedCharsTotal: row.pasted_chars_total || 0,
+      isCurrentlyAway: Boolean(row.is_currently_away),
+      totalErrorsCount: row.total_errors_count || 0,
+      totalAttemptsCount: row.total_attempts_count || 0,
+      completedTasksCount: row.completed_tasks_count || 0,
+      lastCodeSnippet: row.last_code_snippet,
+      lastErrorMessage: row.last_error_message,
+      eventsLog: Array.isArray(row.events_log) ? row.events_log : []
     }));
   } catch (err) {
     console.error('Error in loadClassroomSessionsFromDb:', err);
@@ -218,6 +229,35 @@ export async function updateSessionInDb(
     });
   } catch (err) {
     console.error('Error updating session:', err);
+  }
+}
+
+// 4.1 Обновление расширенной телеметрии (сворачивание окон, вставки, ошибки)
+export async function updateSessionTelemetryInDb(
+  userId: string,
+  _event?: any,
+  dataUpdate?: any
+) {
+  if (!isSupabaseConfigured) return;
+  try {
+    const payload: any = {
+      user_id: userId,
+      last_ping_at: new Date().toISOString()
+    };
+    if (dataUpdate?.tabSwitchCount !== undefined) payload.tab_switch_count = dataUpdate.tabSwitchCount;
+    if (dataUpdate?.totalAwaySeconds !== undefined) payload.total_away_seconds = dataUpdate.totalAwaySeconds;
+    if (dataUpdate?.pasteCount !== undefined) payload.paste_count = dataUpdate.pasteCount;
+    if (dataUpdate?.pastedCharsTotal !== undefined) payload.pasted_chars_total = dataUpdate.pastedCharsTotal;
+    if (dataUpdate?.isCurrentlyAway !== undefined) payload.is_currently_away = dataUpdate.isCurrentlyAway;
+    if (dataUpdate?.totalErrorsCount !== undefined) payload.total_errors_count = dataUpdate.totalErrorsCount;
+    if (dataUpdate?.totalAttemptsCount !== undefined) payload.total_attempts_count = dataUpdate.totalAttemptsCount;
+    if (dataUpdate?.completedTasksCount !== undefined) payload.completed_tasks_count = dataUpdate.completedTasksCount;
+    if (dataUpdate?.lastCodeSnippet) payload.last_code_snippet = dataUpdate.lastCodeSnippet;
+    if (dataUpdate?.lastErrorMessage) payload.last_error_message = dataUpdate.lastErrorMessage;
+
+    await supabase.from('classroom_sessions').upsert(payload, { onConflict: 'user_id' });
+  } catch (err) {
+    console.warn('Error updating session telemetry in Supabase:', err);
   }
 }
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { Task, Lesson } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { evaluateCsharpCode } from '../../services/csharpRunner';
@@ -15,7 +15,8 @@ import {
   Award,
   Flame,
   Check,
-  X
+  X,
+  ShieldAlert
 } from 'lucide-react';
 
 interface TaskPlayerModalProps {
@@ -45,7 +46,8 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
     requestTeacherHelp, 
     completedTaskIds,
     studentsInClass,
-    currentUser
+    currentUser,
+    recordStudentTelemetry
   } = useApp();
 
   const isAlreadyCompleted = completedTaskIds.includes(task.id);
@@ -61,6 +63,117 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   const [isAskingHelp, setIsAskingHelp] = useState(false);
   const [helpQuestionText, setHelpQuestionText] = useState('');
   const [helpSent, setHelpSent] = useState(false);
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+
+  const awayStartRef = useRef<number | null>(null);
+  const isAwayRef = useRef(false);
+
+  // Tab switch & window blur anti-cheat telemetry tracking
+  useEffect(() => {
+    const handleAway = () => {
+      if (isAwayRef.current) return;
+      isAwayRef.current = true;
+      awayStartRef.current = Date.now();
+
+      recordStudentTelemetry(
+        {
+          id: `tel-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          type: 'tab_switch_away',
+          timestamp: new Date().toISOString(),
+          taskId: task.id,
+          taskTitle: task.title,
+          details: 'Свернул вкладку или переключился на другое окно / приложение'
+        },
+        {
+          isCurrentlyAway: true,
+          tabSwitchCount: (currentStudentData?.tabSwitchCount || 0) + 1,
+          currentTaskId: task.id,
+          currentTaskTitle: task.title
+        }
+      );
+    };
+
+    const handleBack = () => {
+      if (!isAwayRef.current) return;
+      isAwayRef.current = false;
+      const durationSec = awayStartRef.current 
+        ? Math.max(1, Math.round((Date.now() - awayStartRef.current) / 1000))
+        : 1;
+      awayStartRef.current = null;
+
+      recordStudentTelemetry(
+        {
+          id: `tel-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          type: 'tab_switch_back',
+          timestamp: new Date().toISOString(),
+          taskId: task.id,
+          taskTitle: task.title,
+          details: `Вернулся в окно задания (отсутствовал ${durationSec} сек)`,
+          durationSeconds: durationSec
+        },
+        {
+          isCurrentlyAway: false,
+          totalAwaySeconds: (currentStudentData?.totalAwaySeconds || 0) + durationSec,
+          currentTaskId: task.id,
+          currentTaskTitle: task.title
+        }
+      );
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        handleAway();
+      } else {
+        handleBack();
+      }
+    };
+
+    const onWindowBlur = () => {
+      handleAway();
+    };
+
+    const onWindowFocus = () => {
+      handleBack();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('focus', onWindowFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
+    };
+  }, [task.id, task.title, currentStudentData?.tabSwitchCount, currentStudentData?.totalAwaySeconds, recordStudentTelemetry]);
+
+  // Handle Clipboard Paste Anti-Cheat Event
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = e.clipboardData?.getData('text') || '';
+    if (pasted.length > 5) {
+      setPasteNotice(`Вставка из буфера (${pasted.length} симв.) зафиксирована античитом`);
+      setTimeout(() => setPasteNotice(null), 4000);
+
+      recordStudentTelemetry(
+        {
+          id: `tel-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          type: 'code_paste',
+          timestamp: new Date().toISOString(),
+          taskId: task.id,
+          taskTitle: task.title,
+          details: `Вставил ${pasted.length} символов кода из буфера обмена`,
+          pastedChars: pasted.length
+        },
+        {
+          pasteCount: (currentStudentData?.pasteCount || 0) + 1,
+          pastedCharsTotal: (currentStudentData?.pastedCharsTotal || 0) + pasted.length,
+          lastCodeSnippet: pasted.slice(0, 200),
+          currentTaskId: task.id,
+          currentTaskTitle: task.title
+        }
+      );
+    }
+  };
 
   // Tab key indent handler
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -89,6 +202,44 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
       if (result.success) {
         completeTask(task.id, task.xp);
         setShowSuccessCelebration(true);
+
+        recordStudentTelemetry(
+          {
+            id: `tel-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            type: 'task_completed',
+            timestamp: new Date().toISOString(),
+            taskId: task.id,
+            taskTitle: task.title,
+            details: 'Код успешно скомпилирован и прошел все юнит-тесты'
+          },
+          {
+            completedTasksCount: (currentStudentData?.completedTasksCount || 0) + 1,
+            totalAttemptsCount: (currentStudentData?.totalAttemptsCount || 0) + 1,
+            lastCodeSnippet: code,
+            lastErrorMessage: undefined,
+            status: 'active'
+          }
+        );
+      } else {
+        const errorText = result.errorMessage || result.output || 'Ошибка компиляции C#';
+        recordStudentTelemetry(
+          {
+            id: `tel-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            type: 'code_error',
+            timestamp: new Date().toISOString(),
+            taskId: task.id,
+            taskTitle: task.title,
+            details: errorText,
+            errorMessage: errorText
+          },
+          {
+            totalErrorsCount: (currentStudentData?.totalErrorsCount || 0) + 1,
+            totalAttemptsCount: (currentStudentData?.totalAttemptsCount || 0) + 1,
+            lastCodeSnippet: code,
+            lastErrorMessage: errorText,
+            status: 'stuck'
+          }
+        );
       }
     }, 400);
   };
@@ -106,6 +257,39 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
     if (isCorrect) {
       completeTask(task.id, task.xp);
       setShowSuccessCelebration(true);
+
+      recordStudentTelemetry(
+        {
+          id: `tel-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          type: 'task_completed',
+          timestamp: new Date().toISOString(),
+          taskId: task.id,
+          taskTitle: task.title,
+          details: 'Тестовый вопрос решен верно с 1-й попытки'
+        },
+        {
+          completedTasksCount: (currentStudentData?.completedTasksCount || 0) + 1,
+          totalAttemptsCount: (currentStudentData?.totalAttemptsCount || 0) + 1,
+          status: 'active'
+        }
+      );
+    } else {
+      recordStudentTelemetry(
+        {
+          id: `tel-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          type: 'quiz_error',
+          timestamp: new Date().toISOString(),
+          taskId: task.id,
+          taskTitle: task.title,
+          details: 'Неверный выбор в контрольном вопросе',
+          errorMessage: 'Выбран неверный вариант ответа'
+        },
+        {
+          totalErrorsCount: (currentStudentData?.totalErrorsCount || 0) + 1,
+          totalAttemptsCount: (currentStudentData?.totalAttemptsCount || 0) + 1,
+          status: 'stuck'
+        }
+      );
     }
   };
 
@@ -303,20 +487,29 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
             {task.type !== 'quiz' ? (
               <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Code Textarea with Line Numbers */}
-                <div className="flex-1 p-3 overflow-y-auto font-mono text-xs sm:text-sm flex gap-3 bg-slate-950">
-                  <div className="select-none text-right text-slate-600 font-mono text-xs pt-0.5 leading-relaxed shrink-0 pr-2 border-r border-slate-800/80">
-                    {code.split('\n').map((_, i) => (
-                      <div key={i}>{i + 1}</div>
-                    ))}
+                <div className="flex-1 p-3 overflow-y-auto font-mono text-xs sm:text-sm flex flex-col bg-slate-950">
+                  {pasteNotice && (
+                    <div className="mb-2 py-1 px-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs flex items-center gap-2">
+                      <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                      <span>{pasteNotice}</span>
+                    </div>
+                  )}
+                  <div className="flex flex-1 gap-3">
+                    <div className="select-none text-right text-slate-600 font-mono text-xs pt-0.5 leading-relaxed shrink-0 pr-2 border-r border-slate-800/80">
+                      {code.split('\n').map((_, i) => (
+                        <div key={i}>{i + 1}</div>
+                      ))}
+                    </div>
+                    <textarea
+                      rows={12}
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      onPaste={handlePaste}
+                      spellCheck={false}
+                      className="flex-1 w-full h-full min-h-[220px] bg-transparent text-slate-100 font-mono resize-none focus:outline-none leading-relaxed selection:bg-indigo-600/30 whitespace-pre"
+                    />
                   </div>
-                  <textarea
-                    rows={12}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    spellCheck={false}
-                    className="flex-1 w-full h-full min-h-[220px] bg-transparent text-slate-100 font-mono resize-none focus:outline-none leading-relaxed selection:bg-indigo-600/30 whitespace-pre"
-                  />
                 </div>
 
                 {/* Console Output Panel */}

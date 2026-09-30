@@ -2520,8 +2520,31 @@ export const sampleStudents = [
     totalXp: 340,
     isOnline: true,
     currentTaskId: 'task-2-1-2',
+    currentTaskTitle: 'Современные Switch Expressions в C#',
+    currentLessonTitle: '2.1 Ветвления if / else if / else',
+    status: 'active' as const,
+    attemptsOnCurrentTask: 2,
+    timeOnCurrentTaskMinutes: 8,
+    needsHelp: false,
     stuckMinutes: 8,
-    lastActiveAt: '1 минуту назад'
+    lastActiveAt: '1 минуту назад',
+    // Полная телеметрия и прокторинг
+    tabSwitchCount: 1,
+    totalAwaySeconds: 14,
+    pasteCount: 0,
+    pastedCharsTotal: 0,
+    isCurrentlyAway: false,
+    totalErrorsCount: 3,
+    totalAttemptsCount: 9,
+    completedTasksCount: 6,
+    lastCodeSnippet: `string role = "teacher";\nstring title = role switch {\n    "admin" => "Администратор",\n    "teacher" => "Преподаватель",\n    _ => "Студент"\n};\nConsole.WriteLine(title);`,
+    lastErrorMessage: undefined,
+    eventsLog: [
+      { id: 'ev-1-1', type: 'success' as const, timestamp: '10:24:10', details: 'Успешно решено задание 2.1.1', taskTitle: 'Проверка студенческой оценки' },
+      { id: 'ev-1-2', type: 'tab_switch_away' as const, timestamp: '10:21:40', details: 'Свернул окно (переключился в браузер с документацией Microsoft Docs)' },
+      { id: 'ev-1-3', type: 'tab_switch_back' as const, timestamp: '10:21:54', details: 'Возврат в окно задания', durationSeconds: 14 },
+      { id: 'ev-1-4', type: 'error' as const, timestamp: '10:20:12', details: 'CS1002: ; expected на строке 7', taskTitle: 'Switch Expressions' }
+    ]
   },
   {
     id: 'stud-2',
@@ -2534,8 +2557,27 @@ export const sampleStudents = [
     totalXp: 620,
     isOnline: true,
     currentTaskId: 'task-3-1-1',
+    currentTaskTitle: 'Сумма четных чисел от 1 до 10',
+    currentLessonTitle: '3.1 Цикл for и счетчики',
+    status: 'active' as const,
+    attemptsOnCurrentTask: 1,
+    timeOnCurrentTaskMinutes: 4,
+    needsHelp: false,
     stuckMinutes: 0,
-    lastActiveAt: 'В сети'
+    lastActiveAt: 'В сети',
+    // Полная телеметрия
+    tabSwitchCount: 0,
+    totalAwaySeconds: 0,
+    pasteCount: 0,
+    pastedCharsTotal: 0,
+    isCurrentlyAway: false,
+    totalErrorsCount: 1,
+    totalAttemptsCount: 9,
+    completedTasksCount: 8,
+    lastCodeSnippet: `int sum = 0;\nfor (int i = 1; i <= 10; i++) {\n    if (i % 2 == 0) sum += i;\n}\nConsole.WriteLine(sum);`,
+    eventsLog: [
+      { id: 'ev-2-1', type: 'success' as const, timestamp: '10:25:00', details: 'Решено 8 заданий без единого переключения вкладок' }
+    ]
   },
   {
     id: 'stud-3',
@@ -2548,8 +2590,32 @@ export const sampleStudents = [
     totalXp: 180,
     isOnline: true,
     currentTaskId: 'task-1-2-2',
+    currentTaskTitle: 'Поиск ошибки: Целочисленное деление',
+    currentLessonTitle: '1.2 Типы данных и преобразования',
+    status: 'stuck' as const,
+    attemptsOnCurrentTask: 4,
+    timeOnCurrentTaskMinutes: 14,
+    needsHelp: true,
+    helpMessage: 'Не понимаю, почему 7 / 2 дает 3, если переменная объявлена как double result',
     stuckMinutes: 14,
-    lastActiveAt: 'Застрял (3 ошибки компиляции)'
+    lastActiveAt: 'Застрял (3 ошибки компиляции)',
+    // Полная телеметрия
+    tabSwitchCount: 5,
+    totalAwaySeconds: 220,
+    pasteCount: 2,
+    pastedCharsTotal: 90,
+    isCurrentlyAway: false,
+    totalErrorsCount: 6,
+    totalAttemptsCount: 10,
+    completedTasksCount: 2,
+    lastCodeSnippet: `int a = 7;\nint b = 2;\ndouble result = a / b; // Ошибка: деление int на int\nConsole.WriteLine(result);`,
+    lastErrorMessage: 'Тест не пройден: Ожидался вывод 3.5, получено 3. Проверьте явное приведение (double)a / b',
+    eventsLog: [
+      { id: 'ev-3-1', type: 'error' as const, timestamp: '10:23:45', details: 'Тест не пройден: деление int / int вернуло 3' },
+      { id: 'ev-3-2', type: 'tab_switch_away' as const, timestamp: '10:21:10', details: 'Переключение в браузер (поиск решения)' },
+      { id: 'ev-3-3', type: 'tab_switch_back' as const, timestamp: '10:22:40', details: 'Возврат на вкладку', durationSeconds: 90 },
+      { id: 'ev-3-4', type: 'code_paste' as const, timestamp: '10:22:50', details: 'Вставка фрагмента кода из буфера обмена (45 символов)', charsPasted: 45 }
+    ]
   },
   {
     id: 'stud-4',
@@ -2562,8 +2628,29 @@ export const sampleStudents = [
     totalXp: 490,
     isOnline: true,
     currentTaskId: 'task-2-2-1',
+    currentTaskTitle: 'Определение дня недели по номеру',
+    currentLessonTitle: '2.2 Pattern Matching и сопоставление с шаблоном',
+    status: 'completed_step' as const,
+    attemptsOnCurrentTask: 1,
+    timeOnCurrentTaskMinutes: 5,
+    needsHelp: false,
     stuckMinutes: 2,
-    lastActiveAt: 'В сети'
+    lastActiveAt: 'В сети',
+    // Полная телеметрия
+    tabSwitchCount: 2,
+    totalAwaySeconds: 28,
+    pasteCount: 0,
+    pastedCharsTotal: 0,
+    isCurrentlyAway: false,
+    totalErrorsCount: 2,
+    totalAttemptsCount: 9,
+    completedTasksCount: 7,
+    lastCodeSnippet: `int day = 3;\nstring dayName = day switch {\n    1 => "Понедельник",\n    2 => "Вторник",\n    3 => "Среда",\n    6 or 7 => "Выходной",\n    _ => "Некорректный день"\n};\nConsole.WriteLine(dayName);`,
+    eventsLog: [
+      { id: 'ev-4-1', type: 'success' as const, timestamp: '10:24:50', details: 'Сдана задача 2.2.1 с первой попытки' },
+      { id: 'ev-4-2', type: 'tab_switch_away' as const, timestamp: '10:19:10', details: 'Свернула окно' },
+      { id: 'ev-4-3', type: 'tab_switch_back' as const, timestamp: '10:19:38', details: 'Возврат в окно задания', durationSeconds: 28 }
+    ]
   },
   {
     id: 'stud-5',
@@ -2576,8 +2663,30 @@ export const sampleStudents = [
     totalXp: 95,
     isOnline: false,
     currentTaskId: 'task-1-1-2',
+    currentTaskTitle: 'Интерполяция строк ($)',
+    currentLessonTitle: '1.1 Первая программа и вывод в консоль',
+    status: 'idle' as const,
+    attemptsOnCurrentTask: 3,
+    timeOnCurrentTaskMinutes: 25,
+    needsHelp: false,
     stuckMinutes: 0,
-    lastActiveAt: 'Был 25 минут назад'
+    lastActiveAt: 'Был 25 минут назад',
+    // Полная телеметрия (Подозрительная активность / Античит флаг)
+    tabSwitchCount: 9,
+    totalAwaySeconds: 380,
+    pasteCount: 4,
+    pastedCharsTotal: 260,
+    isCurrentlyAway: true,
+    totalErrorsCount: 5,
+    totalAttemptsCount: 6,
+    completedTasksCount: 1,
+    lastCodeSnippet: `string language = "C#";\nConsole.WriteLine($"Я изучаю {language} в аудитории!");`,
+    lastErrorMessage: 'CS1002: ; expected на строке 4',
+    eventsLog: [
+      { id: 'ev-5-1', type: 'code_paste' as const, timestamp: '10:05:12', details: '⚠️ Массовая вставка кода из буфера обмена (140 символов целиком)', charsPasted: 140 },
+      { id: 'ev-5-2', type: 'tab_switch_away' as const, timestamp: '10:04:10', details: '⚠️ Длительный уход с вкладки (отсутствовал 3 мин 20 сек)' },
+      { id: 'ev-5-3', type: 'tab_switch_back' as const, timestamp: '10:07:30', details: 'Возврат во вкладку', durationSeconds: 200 }
+    ]
   },
   {
     id: 'stud-6',
@@ -2590,8 +2699,27 @@ export const sampleStudents = [
     totalXp: 780,
     isOnline: true,
     currentTaskId: 'task-4-1-1',
+    currentTaskTitle: 'Статический метод расчета налога CalculateTax',
+    currentLessonTitle: '4.1 Объявление методов и возврат значений',
+    status: 'active' as const,
+    attemptsOnCurrentTask: 1,
+    timeOnCurrentTaskMinutes: 3,
+    needsHelp: false,
     stuckMinutes: 0,
-    lastActiveAt: 'В сети'
+    lastActiveAt: 'В сети',
+    // Полная телеметрия
+    tabSwitchCount: 1,
+    totalAwaySeconds: 12,
+    pasteCount: 0,
+    pastedCharsTotal: 0,
+    isCurrentlyAway: false,
+    totalErrorsCount: 2,
+    totalAttemptsCount: 13,
+    completedTasksCount: 11,
+    lastCodeSnippet: `public static double CalculateTax(double income) => income * 0.13;\nstatic void Main() {\n    double tax = CalculateTax(100000);\n    Console.WriteLine(tax);\n}`,
+    eventsLog: [
+      { id: 'ev-6-1', type: 'success' as const, timestamp: '10:24:00', details: 'Успешно решено 11 заданий (лидер группы)' }
+    ]
   }
 ];
 

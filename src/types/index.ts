@@ -89,6 +89,19 @@ export interface StudentProgress {
   scorePercent?: number;
 }
 
+export interface TelemetryEvent {
+  id: string;
+  type: 'tab_switch_away' | 'tab_switch_back' | 'window_blur' | 'window_focus' | 'code_paste' | 'error' | 'success' | 'task_completed' | 'code_error' | 'quiz_error';
+  timestamp: string;
+  details?: string;
+  durationSeconds?: number;
+  charsPasted?: number;
+  pastedChars?: number;
+  errorMessage?: string;
+  taskId?: string;
+  taskTitle?: string;
+}
+
 export interface StudentLiveSession {
   student: UserProfile;
   activeLessonTitle: string;
@@ -100,4 +113,17 @@ export interface StudentLiveSession {
   needsHelp: boolean;
   helpMessage?: string;
   lastUpdate: string;
+  // Full Telemetry & Anti-cheat
+  tabSwitchCount?: number;
+  totalAwaySeconds?: number;
+  pasteCount?: number;
+  pastedCharsTotal?: number;
+  isCurrentlyAway?: boolean;
+  totalErrorsCount?: number;
+  totalAttemptsCount?: number;
+  completedTasksCount?: number;
+  lastCodeSnippet?: string;
+  lastErrorMessage?: string;
+  eventsLog?: TelemetryEvent[];
 }
+

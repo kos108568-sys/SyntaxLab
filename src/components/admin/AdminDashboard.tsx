@@ -19,7 +19,6 @@ import {
   Send,
   PlusCircle,
   FileCode,
-  Flame,
   Award,
   Database,
   Copy,
@@ -37,8 +36,36 @@ import {
   ChevronUp,
   Lock,
   Unlock,
-  SlidersHorizontal
+  SlidersHorizontal,
+  ShieldAlert,
+  ShieldCheck,
+  Eye,
+  History,
+  Activity,
+  FileText,
+  Laptop
 } from 'lucide-react';
+
+export const calculateHonesty = (student: ClassroomStudentState) => {
+  const switches = student.tabSwitchCount || 0;
+  const pastes = student.pasteCount || 0;
+  const awaySec = student.totalAwaySeconds || 0;
+  const penalty = switches * 4 + pastes * 6 + (awaySec > 120 ? 15 : awaySec > 40 ? 8 : 0);
+  const score = Math.max(15, Math.min(100, 100 - penalty));
+  let label = 'Высокая (Самостоятельно)';
+  let color = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+  let badgeText = 'Честно';
+  if (score < 60) {
+    label = 'Низкая (Риск списывания / AI)';
+    color = 'text-red-400 bg-red-500/10 border-red-500/20';
+    badgeText = 'Подозрение';
+  } else if (score < 85) {
+    label = 'Средняя (Частые смены окон)';
+    color = 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+    badgeText = 'Внимание';
+  }
+  return { score, label, color, badgeText };
+};
 
 export const AdminDashboard: React.FC = () => {
   const {
@@ -60,6 +87,8 @@ export const AdminDashboard: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'radar' | 'students' | 'curriculum' | 'gradebook' | 'database'>('radar');
   const [selectedStudentForHelp, setSelectedStudentForHelp] = useState<ClassroomStudentState | null>(null);
+  const [selectedStudentForDossier, setSelectedStudentForDossier] = useState<ClassroomStudentState | null>(null);
+  const [dossierTab, setDossierTab] = useState<'summary' | 'timeline' | 'code'>('summary');
   const [helpCommentInput, setHelpCommentInput] = useState('');
   const [newAnnouncement, setNewAnnouncement] = useState('');
   const [fixSqlCopied, setFixSqlCopied] = useState(false);
@@ -490,55 +519,76 @@ end $$;`;
         <div className="space-y-6">
           
           {/* Quick Classroom Stats */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
               <div>
-                <p className="text-xs text-slate-400 font-medium">Студентов в аудитории</p>
+                <p className="text-[11px] text-slate-400 font-medium">Студентов в аудитории</p>
                 <p className="text-2xl font-bold text-white mt-1">{studentsInClass.length}</p>
-                <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
+                <p className="text-[10px] text-emerald-400 mt-1 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                   Группа ИТ-301
                 </p>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-                <Users className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                <Users className="w-4 h-4" />
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
               <div>
-                <p className="text-xs text-slate-400 font-medium">Требуют внимания / Застряли</p>
+                <p className="text-[11px] text-slate-400 font-medium">Требуют помощи</p>
                 <p className="text-2xl font-bold text-amber-400 mt-1">{stuckStudents.length}</p>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  {stuckStudents.length > 0 ? 'Нужна подсказка преподавателя' : 'Все справляются сами'}
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {stuckStudents.length > 0 ? 'Ждут подсказки' : 'Все справляются'}
                 </p>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                <AlertTriangle className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                <AlertTriangle className="w-4 h-4" />
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
               <div>
-                <p className="text-xs text-slate-400 font-medium">Средний прогресс группы</p>
-                <p className="text-2xl font-bold text-emerald-400 mt-1">68%</p>
-                <p className="text-[11px] text-slate-400 mt-1">Модуль 2: Управляющие конструкции</p>
+                <p className="text-[11px] text-slate-400 font-medium">Смен окон (Anti-cheat)</p>
+                <p className="text-2xl font-bold text-indigo-300 mt-1 font-mono">
+                  {studentsInClass.reduce((acc, s) => acc + (s.tabSwitchCount || 0), 0)}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Вставок из буфера: {studentsInClass.reduce((acc, s) => acc + (s.pasteCount || 0), 0)}
+                </p>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                <CheckCircle2 className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                <ShieldAlert className="w-4 h-4" />
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
               <div>
-                <p className="text-xs text-slate-400 font-medium">Сложный рубеж пары</p>
-                <p className="text-sm font-semibold text-purple-300 mt-1 truncate max-w-[150px]">
-                  Целочисленное деление
+                <p className="text-[11px] text-slate-400 font-medium">Всего ошибок / сбоев</p>
+                <p className="text-2xl font-bold text-purple-300 mt-1 font-mono">
+                  {studentsInClass.reduce((acc, s) => acc + (s.totalErrorsCount || 0), 0)}
                 </p>
-                <p className="text-[11px] text-purple-400 mt-1">В среднем 2.8 попытки</p>
+                <p className="text-[10px] text-purple-400 mt-1">
+                  Сдано заданий: +{studentsInClass.reduce((acc, s) => acc + (s.completedTasksCount || 0), 0)}
+                </p>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-                <FileCode className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                <FileCode className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
+              <div>
+                <p className="text-[11px] text-slate-400 font-medium">Свернули окно сейчас</p>
+                <p className="text-2xl font-bold text-rose-400 mt-1 font-mono">
+                  {studentsInClass.filter(s => s.isCurrentlyAway).length}
+                </p>
+                <p className="text-[10px] text-rose-300/80 mt-1">
+                  {studentsInClass.filter(s => s.isCurrentlyAway).length > 0 ? 'Вне активной вкладки' : 'Все в окне кода'}
+                </p>
+              </div>
+              <div className="w-9 h-9 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                <Laptop className="w-4 h-4" />
               </div>
             </div>
           </div>
@@ -552,8 +602,8 @@ end $$;`;
                   Live sync
                 </span>
               </h2>
-              <span className="text-xs text-slate-400">
-                Кликните на студента, чтобы отправить персональную подсказку
+              <span className="text-xs text-slate-400 hidden sm:inline">
+                Кликните «Досье» для просмотра истории переключений, ошибок и написанного кода
               </span>
             </div>
 
@@ -572,44 +622,59 @@ end $$;`;
                 studentsInClass.map((student) => {
                   const isStuck = student.status === 'stuck' || student.needsHelp;
                   const isCompleted = student.status === 'completed_step';
+                  const honesty = calculateHonesty(student);
 
                   return (
                     <div
                       key={student.id}
-                      className={`relative rounded-xl border p-4 transition-all duration-200 ${
+                      className={`relative rounded-xl border p-4 space-y-3 transition-all duration-200 ${
                         isStuck
                           ? 'bg-amber-950/20 border-amber-500/40 shadow-lg shadow-amber-500/10'
+                          : student.isCurrentlyAway
+                          ? 'bg-rose-950/20 border-rose-500/30'
                           : isCompleted
                           ? 'bg-emerald-950/20 border-emerald-500/30'
                           : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
                       }`}
                     >
                     {/* Status Badge Tag */}
-                    <div className="flex items-center justify-between gap-2 mb-3">
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={student.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
-                          alt={student.fullName}
-                          className="w-9 h-9 rounded-full ring-2 ring-slate-700 object-cover"
-                        />
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="relative">
+                          <img
+                            src={student.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
+                            alt={student.fullName}
+                            className="w-10 h-10 rounded-full ring-2 ring-slate-700 object-cover"
+                          />
+                          {student.isCurrentlyAway ? (
+                            <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full border-2 border-slate-900" title="Свернул окно" />
+                          ) : (
+                            <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-slate-900" title="В активном окне" />
+                          )}
+                        </div>
                         <div>
                           <h3 className="text-sm font-semibold text-white leading-tight">{student.fullName}</h3>
-                          <span className="text-[11px] text-slate-400">{student.groupName}</span>
+                          <span className="text-[11px] text-slate-400 font-mono">{student.groupName}</span>
                         </div>
                       </div>
 
-                      {isStuck ? (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full animate-pulse">
+                      {student.isCurrentlyAway ? (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-rose-300 bg-rose-500/20 border border-rose-500/30 px-2 py-0.5 rounded-full animate-pulse">
+                          <Laptop className="w-3 h-3" />
+                          Свернул окно
+                        </span>
+                      ) : isStuck ? (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full animate-pulse">
                           <AlertTriangle className="w-3 h-3" />
                           {student.needsHelp ? 'Поднял руку!' : 'Застрял'}
                         </span>
                       ) : isCompleted ? (
-                        <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                        <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                           <CheckCircle2 className="w-3 h-3" />
                           Сдал шаг
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-medium text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full">
+                        <span className="flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full">
                           <Clock className="w-3 h-3" />
                           В коде
                         </span>
@@ -617,24 +682,65 @@ end $$;`;
                     </div>
 
                     {/* Current Task Info */}
-                    <div className="bg-slate-950/60 rounded-lg p-2.5 border border-slate-800/60 space-y-1.5">
+                    <div className="bg-slate-950/60 rounded-lg p-2.5 border border-slate-800/60 space-y-1">
                       <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                        <span>Текущее задание:</span>
+                        <span>Задание:</span>
                         <span className="font-mono text-slate-300">
-                          {student.attemptsOnCurrentTask > 0 ? `${student.attemptsOnCurrentTask} попытки` : '1 попытка'}
+                          {student.attemptsOnCurrentTask > 0 ? `${student.attemptsOnCurrentTask} поп.` : '1 поп.'}
                         </span>
                       </div>
-                      <p className="text-xs font-semibold text-slate-200 line-clamp-1">
+                      <p className="text-xs font-semibold text-slate-200 truncate">
                         {student.currentTaskTitle}
                       </p>
-                      <p className="text-[11px] text-indigo-400">
+                      <p className="text-[11px] text-indigo-400 truncate">
                         {student.currentLessonTitle}
                       </p>
                     </div>
 
+                    {/* Telemetry Strip: Completed, Errors, Switches, Pastes */}
+                    <div className="grid grid-cols-4 gap-1.5 text-[11px] font-mono">
+                      <div className="bg-slate-950/70 rounded-lg p-1.5 border border-slate-800/80 text-center" title="Сдано заданий">
+                        <span className="text-[9px] text-slate-500 block uppercase font-sans font-semibold">Заданий</span>
+                        <span className="font-bold text-emerald-400">+{student.completedTasksCount || 0}</span>
+                      </div>
+                      <div className="bg-slate-950/70 rounded-lg p-1.5 border border-slate-800/80 text-center" title="Количество ошибок компиляции и тестов">
+                        <span className="text-[9px] text-slate-500 block uppercase font-sans font-semibold">Ошибок</span>
+                        <span className={`font-bold ${(student.totalErrorsCount || 0) > 3 ? 'text-red-400' : (student.totalErrorsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                          {student.totalErrorsCount || 0}
+                        </span>
+                      </div>
+                      <div className="bg-slate-950/70 rounded-lg p-1.5 border border-slate-800/80 text-center" title="Сворачиваний и смен окон / вкладок">
+                        <span className="text-[9px] text-slate-500 block uppercase font-sans font-semibold">Смен окон</span>
+                        <span className={`font-bold ${(student.tabSwitchCount || 0) > 3 ? 'text-rose-400' : (student.tabSwitchCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                          {student.tabSwitchCount || 0}
+                        </span>
+                      </div>
+                      <div className="bg-slate-950/70 rounded-lg p-1.5 border border-slate-800/80 text-center" title="Вставок кода из буфера обмена (Ctrl+V)">
+                        <span className="text-[9px] text-slate-500 block uppercase font-sans font-semibold">Вставок</span>
+                        <span className={`font-bold ${(student.pasteCount || 0) > 2 ? 'text-purple-400' : 'text-slate-400'}`}>
+                          {student.pasteCount || 0}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Honesty Score Indicator */}
+                    <div className="flex items-center justify-between text-[11px] px-2.5 py-1 rounded-lg bg-slate-950/50 border border-slate-800">
+                      <span className="text-slate-400 flex items-center gap-1.5">
+                        {honesty.score >= 85 ? (
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                        )}
+                        <span>Античит индекс:</span>
+                      </span>
+                      <span className={`font-bold font-mono px-1.5 py-0.5 rounded text-[10px] border ${honesty.color}`}>
+                        {honesty.score}% • {honesty.badgeText}
+                      </span>
+                    </div>
+
                     {/* Student Request Message if stuck */}
                     {student.helpMessage && (
-                      <div className="mt-2.5 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-200">
+                      <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-200">
                         <span className="font-semibold block text-[10px] text-amber-400 uppercase tracking-wide">
                           Вопрос студента:
                         </span>
@@ -644,7 +750,7 @@ end $$;`;
 
                     {/* Teacher's sent comment preview */}
                     {student.teacherComment && (
-                      <div className="mt-2.5 p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-xs text-indigo-300">
+                      <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-xs text-indigo-300">
                         <span className="font-semibold block text-[10px] text-indigo-400 uppercase tracking-wide">
                           Ваша подсказка:
                         </span>
@@ -652,14 +758,27 @@ end $$;`;
                       </div>
                     )}
 
-                    {/* Quick Action Footer */}
-                    <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2 text-slate-400">
+                    {/* Action Footer */}
+                    <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 text-slate-400">
                         <Award className="w-3.5 h-3.5 text-amber-500" />
-                        <span>{student.totalXp} XP</span>
+                        <span className="font-mono font-medium">{student.totalXp} XP</span>
                       </div>
 
                       <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedStudentForDossier(student);
+                            setDossierTab('summary');
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-medium transition-all border border-slate-700/60"
+                          title="Открыть полное досье телеметрии, историю действий и код"
+                        >
+                          <Eye className="w-3 h-3 text-indigo-400" />
+                          <span>Досье</span>
+                        </button>
+
                         {isStuck && (
                           <button
                             type="button"
@@ -670,6 +789,7 @@ end $$;`;
                             Снять алерт
                           </button>
                         )}
+                        
                         <button
                           type="button"
                           onClick={() => {
@@ -1028,43 +1148,98 @@ end $$;`;
                   <tr>
                     <th className="px-4 py-3">Студент (ФИО)</th>
                     <th className="px-4 py-3">Группа</th>
-                    <th className="px-4 py-3">GitHub Email</th>
-                    <th className="px-4 py-3">Опыт (XP)</th>
-                    <th className="px-4 py-3 text-right">Действие</th>
+                    <th className="px-3 py-3 text-center">Заданий</th>
+                    <th className="px-3 py-3 text-center">Ошибок</th>
+                    <th className="px-3 py-3 text-center">Смен окон</th>
+                    <th className="px-3 py-3 text-center">Вставок</th>
+                    <th className="px-3 py-3 text-center">Честность</th>
+                    <th className="px-4 py-3 text-right">Действия</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 bg-slate-900/40">
                   {allStudents
                     .filter(s => s.is_approved && (filterGroup === 'all' || s.group_name === filterGroup))
-                    .map((student) => (
-                      <tr key={student.id} className="hover:bg-slate-950/40 transition-colors">
-                        <td className="px-4 py-3 font-semibold text-white flex items-center gap-2.5">
-                          <img
-                            src={student.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
-                            alt=""
-                            className="w-7 h-7 rounded-full object-cover"
-                          />
-                          <span>{student.full_name}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="px-2 py-0.5 bg-slate-800 text-indigo-400 rounded font-mono font-medium">
-                            {student.group_name || '—'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-slate-400">{student.email}</td>
-                        <td className="px-4 py-3 font-bold text-amber-400 font-mono">{student.total_xp || 0} XP</td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditStudent(student)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors"
-                          >
-                            <Edit2 className="w-3 h-3 text-indigo-400" />
-                            <span>Редактировать</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    .map((student) => {
+                      const liveSession = studentsInClass.find(s => s.id === student.id || s.email === student.email);
+                      const honesty = liveSession 
+                        ? calculateHonesty(liveSession) 
+                        : { score: 100, badgeText: '100%', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+
+                      return (
+                        <tr key={student.id} className="hover:bg-slate-950/40 transition-colors">
+                          <td className="px-4 py-3 font-semibold text-white flex items-center gap-2.5">
+                            <div className="relative">
+                              <img
+                                src={student.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
+                                alt=""
+                                className="w-8 h-8 rounded-full object-cover"
+                              />
+                              {liveSession?.isCurrentlyAway ? (
+                                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-slate-900" title="Вне вкладки" />
+                              ) : liveSession ? (
+                                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border border-slate-900" title="В активном окне" />
+                              ) : null}
+                            </div>
+                            <div>
+                              <div>{student.full_name}</div>
+                              <span className="text-[10px] text-slate-500 font-mono">{student.email}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="px-2 py-0.5 bg-slate-800 text-indigo-400 rounded font-mono font-medium">
+                              {student.group_name || '—'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-center font-mono font-bold text-emerald-400">
+                            +{liveSession?.completedTasksCount ?? 0}
+                          </td>
+                          <td className="px-3 py-3 text-center font-mono">
+                            <span className={`font-semibold ${(liveSession?.totalErrorsCount || 0) > 3 ? 'text-rose-400' : (liveSession?.totalErrorsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                              {liveSession?.totalErrorsCount ?? 0}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-center font-mono">
+                            <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold ${(liveSession?.tabSwitchCount || 0) > 3 ? 'text-rose-400 bg-rose-500/10' : (liveSession?.tabSwitchCount || 0) > 0 ? 'text-amber-400 bg-amber-500/10' : 'text-slate-400'}`}>
+                              {liveSession?.tabSwitchCount ?? 0}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-center font-mono text-purple-300">
+                            {liveSession?.pasteCount ?? 0}
+                          </td>
+                          <td className="px-3 py-3 text-center font-mono">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${honesty.color}`}>
+                              {honesty.score}%
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              {liveSession && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedStudentForDossier(liveSession);
+                                    setDossierTab('summary');
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors border border-slate-700/60"
+                                  title="Посмотреть полное досье студента"
+                                >
+                                  <Eye className="w-3 h-3 text-indigo-400" />
+                                  <span>Досье</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditStudent(student)}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+                              >
+                                <Edit2 className="w-3 h-3 text-slate-400" />
+                                <span>Правка</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -1271,55 +1446,99 @@ end $$;`;
             </button>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                 <tr>
                   <th className="px-4 py-3">Студент</th>
-                  <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">Серия дней</th>
+                  <th className="px-3 py-3 text-center">Заданий сдано</th>
+                  <th className="px-3 py-3 text-center">Ошибок / Сбоев</th>
+                  <th className="px-3 py-3 text-center">Смен окон (Anti-cheat)</th>
+                  <th className="px-3 py-3 text-center">Вставок кода</th>
+                  <th className="px-3 py-3 text-center">Честность</th>
                   <th className="px-4 py-3">Всего XP</th>
-                  <th className="px-4 py-3">Текущий рубеж</th>
-                  <th className="px-4 py-3">Статус в аудитории</th>
+                  <th className="px-4 py-3">Текущий шаг</th>
+                  <th className="px-4 py-3 text-right">Досье</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {studentsInClass.map((student) => (
-                  <tr key={student.id} className="hover:bg-slate-950/30 transition-colors">
-                    <td className="px-4 py-3 font-medium text-white flex items-center gap-2">
-                      <img
-                        src={student.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
-                        alt=""
-                        className="w-6 h-6 rounded-full object-cover"
-                      />
-                      {student.fullName}
-                    </td>
-                    <td className="px-4 py-3 text-slate-400 font-mono">{student.email}</td>
-                    <td className="px-4 py-3">
-                      <span className="flex items-center gap-1 text-amber-400 font-medium">
-                        <Flame className="w-3.5 h-3.5 fill-amber-500" />
-                        {student.streakDays} дн.
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-white">{student.totalXp} XP</td>
-                    <td className="px-4 py-3 text-slate-300">{student.currentTaskTitle}</td>
-                    <td className="px-4 py-3">
-                      {student.status === 'stuck' ? (
-                        <span className="text-amber-400 font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                          Застрял ({student.attemptsOnCurrentTask} поп.)
+                {studentsInClass.map((student) => {
+                  const honesty = calculateHonesty(student);
+
+                  return (
+                    <tr key={student.id} className="hover:bg-slate-950/30 transition-colors">
+                      <td className="px-4 py-3 font-medium text-white flex items-center gap-2.5">
+                        <div className="relative">
+                          <img
+                            src={student.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
+                            alt=""
+                            className="w-7 h-7 rounded-full object-cover"
+                          />
+                          {student.isCurrentlyAway ? (
+                            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-slate-900" title="Вне вкладки" />
+                          ) : (
+                            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border border-slate-900" title="В активном окне" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-slate-100">{student.fullName}</div>
+                          <span className="text-[10px] text-slate-400 font-mono">{student.groupName}</span>
+                        </div>
+                      </td>
+
+                      <td className="px-3 py-3 text-center font-mono font-bold text-emerald-400">
+                        +{student.completedTasksCount || 0}
+                      </td>
+
+                      <td className="px-3 py-3 text-center font-mono">
+                        <span className={`font-semibold ${(student.totalErrorsCount || 0) > 3 ? 'text-rose-400' : (student.totalErrorsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                          {student.totalErrorsCount || 0}
                         </span>
-                      ) : student.status === 'completed_step' ? (
-                        <span className="text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                          Сдал последний шаг
+                      </td>
+
+                      <td className="px-3 py-3 text-center font-mono">
+                        <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${(student.tabSwitchCount || 0) > 3 ? 'text-rose-400 bg-rose-500/10' : (student.tabSwitchCount || 0) > 0 ? 'text-amber-400 bg-amber-500/10' : 'text-slate-400'}`}>
+                          {student.tabSwitchCount || 0}
                         </span>
-                      ) : (
-                        <span className="text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded">
-                          В процессе
+                      </td>
+
+                      <td className="px-3 py-3 text-center font-mono text-purple-300">
+                        <span>{student.pasteCount || 0}</span>
+                        {(student.pastedCharsTotal || 0) > 0 && (
+                          <span className="text-[10px] text-slate-500 block">({student.pastedCharsTotal} симв.)</span>
+                        )}
+                      </td>
+
+                      <td className="px-3 py-3 text-center font-mono">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${honesty.color}`}>
+                          {honesty.score}%
                         </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+
+                      <td className="px-4 py-3 font-semibold text-white font-mono">
+                        {student.totalXp} XP
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-300 max-w-[150px] truncate" title={student.currentTaskTitle}>
+                        {student.currentTaskTitle}
+                      </td>
+
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedStudentForDossier(student);
+                            setDossierTab('summary');
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors border border-slate-700/60"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Досье</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1583,6 +1802,477 @@ end $$;`;
           </div>
         </div>
       )}
+
+      {/* MODAL: COMPREHENSIVE STUDENT DOSSIER & PROCTORING AUDIT */}
+      {selectedStudentForDossier && (() => {
+        const student = selectedStudentForDossier;
+        const honesty = calculateHonesty(student);
+        const totalAwayMin = Math.floor((student.totalAwaySeconds || 0) / 60);
+        const totalAwaySec = (student.totalAwaySeconds || 0) % 60;
+        const successRate = student.totalAttemptsCount && student.totalAttemptsCount > 0
+          ? Math.round(((student.completedTasksCount || 0) / student.totalAttemptsCount) * 100)
+          : (student.completedTasksCount || 0) > 0 ? 100 : 0;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full my-auto shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+              
+              {/* Dossier Header */}
+              <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <img
+                      src={student.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
+                      alt=""
+                      className="w-12 h-12 rounded-2xl ring-2 ring-slate-700 object-cover shadow-md"
+                    />
+                    {student.isCurrentlyAway ? (
+                      <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-rose-500 rounded-full border-2 border-slate-900" title="Вне вкладки" />
+                    ) : (
+                      <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-slate-900" title="В активном окне" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">{student.fullName}</h2>
+                      <span className="px-2 py-0.5 rounded text-xs font-mono font-semibold bg-slate-800 text-indigo-400 border border-slate-700">
+                        {student.groupName}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-0.5">
+                      <span className="font-mono">{student.email}</span>
+                      <span>•</span>
+                      <span>Рубеж: <strong className="text-slate-300">{student.currentTaskTitle}</strong></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 ml-auto">
+                  {student.isCurrentlyAway ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30 animate-pulse">
+                      <Laptop className="w-3.5 h-3.5" />
+                      Свернул окно задания
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold text-emerald-300 bg-emerald-500/10 border border-emerald-500/30">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Активен в окне кода
+                    </span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudentForDossier(null)}
+                    className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold transition-all ml-2"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* Dossier Tabs Navigation */}
+              <div className="px-5 pt-3 bg-slate-950/40 border-b border-slate-800 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDossierTab('summary')}
+                  className={`flex items-center gap-2 px-4 py-2 border-b-2 text-xs font-semibold transition-all ${
+                    dossierTab === 'summary'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Сводка & Античит</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDossierTab('timeline')}
+                  className={`flex items-center gap-2 px-4 py-2 border-b-2 text-xs font-semibold transition-all ${
+                    dossierTab === 'timeline'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Хроника действий ({student.eventsLog?.length || 0})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDossierTab('code')}
+                  className={`flex items-center gap-2 px-4 py-2 border-b-2 text-xs font-semibold transition-all ${
+                    dossierTab === 'code'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Код & Ошибки компилятора</span>
+                </button>
+              </div>
+
+              {/* Dossier Content Body */}
+              <div className="flex-1 p-5 overflow-y-auto space-y-5">
+                
+                {/* TAB 1: SUMMARY & PROCTORING */}
+                {dossierTab === 'summary' && (
+                  <div className="space-y-5">
+                    
+                    {/* Top 6 KPI Metric Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-500">Сделано заданий</span>
+                        <p className="text-xl font-mono font-bold text-emerald-400">+{student.completedTasksCount || 0}</p>
+                        <span className="text-[10px] text-slate-400 block font-sans">Практика C#</span>
+                      </div>
+
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-500">Ошибок в коде</span>
+                        <p className={`text-xl font-mono font-bold ${(student.totalErrorsCount || 0) > 3 ? 'text-rose-400' : (student.totalErrorsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                          {student.totalErrorsCount || 0}
+                        </p>
+                        <span className="text-[10px] text-slate-400 block font-sans">Сбоев и тестов</span>
+                      </div>
+
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-500">Всего попыток</span>
+                        <p className="text-xl font-mono font-bold text-slate-200">{student.totalAttemptsCount || 1}</p>
+                        <span className="text-[10px] text-slate-400 block font-sans">{successRate}% успешных</span>
+                      </div>
+
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-500">Смен окон</span>
+                        <p className={`text-xl font-mono font-bold ${(student.tabSwitchCount || 0) > 3 ? 'text-rose-400' : (student.tabSwitchCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                          {student.tabSwitchCount || 0}
+                        </p>
+                        <span className="text-[10px] text-slate-400 block font-sans">Alt+Tab / вкладки</span>
+                      </div>
+
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-500">Вне вкладки</span>
+                        <p className="text-xl font-mono font-bold text-indigo-300">
+                          {totalAwayMin > 0 ? `${totalAwayMin}м ${totalAwaySec}с` : `${totalAwaySec}с`}
+                        </p>
+                        <span className="text-[10px] text-slate-400 block font-sans">Суммарный уход</span>
+                      </div>
+
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-center space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-500">Вставок кода</span>
+                        <p className="text-xl font-mono font-bold text-purple-300">{student.pasteCount || 0}</p>
+                        <span className="text-[10px] text-slate-400 block font-sans">{student.pastedCharsTotal || 0} симв.</span>
+                      </div>
+                    </div>
+
+                    {/* Anti-cheat & Honesty Detailed Assessment */}
+                    <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                            {honesty.score >= 85 ? (
+                              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                            ) : (
+                              <ShieldAlert className="w-4 h-4 text-amber-400" />
+                            )}
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                              <span>Индекс академической честности (Anti-Cheat Index)</span>
+                              <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${honesty.color}`}>
+                                {honesty.score}% • {honesty.badgeText}
+                              </span>
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                              Автоматический расчет на основе смены фокуса браузера, частоты вставок из буфера и времени отсутствия.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-right sm:shrink-0 font-mono">
+                          <span className="text-2xl font-bold text-white">{honesty.score}</span>
+                          <span className="text-slate-400 text-xs">/100</span>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div>
+                        <div className="w-full h-3 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 rounded-full ${
+                              honesty.score >= 85
+                                ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                                : honesty.score >= 60
+                                ? 'bg-gradient-to-r from-amber-500 to-orange-400'
+                                : 'bg-gradient-to-r from-red-600 to-rose-400'
+                            }`}
+                            style={{ width: `${honesty.score}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                          <span>0% (Критический риск списывания)</span>
+                          <span>60% (Порог контроля)</span>
+                          <span>100% (Полная самостоятельность)</span>
+                        </div>
+                      </div>
+
+                      {/* Detailed Factor Breakdown */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1 text-xs">
+                        <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-xl space-y-1">
+                          <span className="font-semibold text-slate-300 block">Переключение окон:</span>
+                          <p className="text-slate-400 leading-relaxed text-[11px]">
+                            {student.tabSwitchCount && student.tabSwitchCount > 0 ? (
+                              <span>Студент покидал вкладку задания <strong>{student.tabSwitchCount} раз</strong>. Снижение рейтинга: -{student.tabSwitchCount * 4}%.</span>
+                            ) : (
+                              <span className="text-emerald-400">Окно не сворачивалось во время работы над заданием.</span>
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-xl space-y-1">
+                          <span className="font-semibold text-slate-300 block">Вставки из буфера обмена:</span>
+                          <p className="text-slate-400 leading-relaxed text-[11px]">
+                            {student.pasteCount && student.pasteCount > 0 ? (
+                              <span>Зафиксировано <strong>{student.pasteCount} вставок</strong> (всего {student.pastedCharsTotal || 0} симв.). Снижение: -{student.pasteCount * 6}%.</span>
+                            ) : (
+                              <span className="text-emerald-400">Код вводился вручную без вставки из буфера.</span>
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-xl space-y-1">
+                          <span className="font-semibold text-slate-300 block">Время в фоне:</span>
+                          <p className="text-slate-400 leading-relaxed text-[11px]">
+                            {student.totalAwaySeconds && student.totalAwaySeconds > 10 ? (
+                              <span>Суммарно провел вне вкладки <strong>{totalAwayMin}м {totalAwaySec}с</strong>.</span>
+                            ) : (
+                              <span className="text-emerald-400">Постоянно находился в активном фокусе.</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Current Task Progress Box */}
+                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      <div>
+                        <span className="text-slate-400 block text-[11px]">Текущая задача студента:</span>
+                        <h4 className="text-sm font-bold text-white mt-0.5">{student.currentTaskTitle}</h4>
+                        <p className="text-indigo-400 text-xs mt-0.5">{student.currentLessonTitle || 'Модуль C# Основы'}</p>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <span className="text-slate-400 text-[11px] block">Попыток на шаге:</span>
+                          <span className="font-mono font-bold text-slate-200">{student.attemptsOnCurrentTask || 1}</span>
+                        </div>
+                        <div className="h-8 w-px bg-slate-800" />
+                        <div className="text-right">
+                          <span className="text-slate-400 text-[11px] block">Всего опыта:</span>
+                          <span className="font-mono font-bold text-amber-400">+{student.totalXp} XP</span>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+
+                {/* TAB 2: TIMELINE AUDIT LOG */}
+                {dossierTab === 'timeline' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <div>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Посекундная хроника событий (Телеметрия)
+                        </h3>
+                        <p className="text-[11px] text-slate-500">
+                          События регистрируются локальным хуком прокторинга при любом действии студента.
+                        </p>
+                      </div>
+                      <span className="text-xs font-mono text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                        Всего записей: {student.eventsLog?.length || 0}
+                      </span>
+                    </div>
+
+                    {!student.eventsLog || student.eventsLog.length === 0 ? (
+                      <div className="p-8 text-center bg-slate-950/40 rounded-xl border border-slate-800/80 space-y-2">
+                        <History className="w-8 h-8 mx-auto text-slate-600" />
+                        <p className="text-xs text-slate-400">События пока не зарегистрированы для этой сессии.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 font-sans">
+                        {student.eventsLog.map((ev, idx) => {
+                          const timeStr = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : 'Недавно';
+                          const isAway = ev.type === 'tab_switch_away' || ev.type === 'window_blur';
+                          const isBack = ev.type === 'tab_switch_back' || ev.type === 'window_focus';
+                          const isPaste = ev.type === 'code_paste';
+                          const isError = ev.type === 'code_error' || ev.type === 'quiz_error' || ev.type === 'error';
+
+                          return (
+                            <div
+                              key={ev.id || idx}
+                              className={`p-3 rounded-xl border flex items-start gap-3 transition-colors ${
+                                isAway
+                                  ? 'bg-rose-950/20 border-rose-500/30'
+                                  : isBack
+                                  ? 'bg-indigo-950/20 border-indigo-500/30'
+                                  : isPaste
+                                  ? 'bg-purple-950/20 border-purple-500/30'
+                                  : isError
+                                  ? 'bg-amber-950/20 border-amber-500/30'
+                                  : 'bg-emerald-950/20 border-emerald-500/30'
+                              }`}
+                            >
+                              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 shrink-0 mt-0.5">
+                                {isAway ? (
+                                  <Laptop className="w-4 h-4 text-rose-400" />
+                                ) : isBack ? (
+                                  <CheckCircle2 className="w-4 h-4 text-indigo-400" />
+                                ) : isPaste ? (
+                                  <FileCode className="w-4 h-4 text-purple-400" />
+                                ) : isError ? (
+                                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                                ) : (
+                                  <Award className="w-4 h-4 text-emerald-400" />
+                                )}
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className={`text-xs font-bold ${
+                                    isAway
+                                      ? 'text-rose-300'
+                                      : isBack
+                                      ? 'text-indigo-300'
+                                      : isPaste
+                                      ? 'text-purple-300'
+                                      : isError
+                                      ? 'text-amber-300'
+                                      : 'text-emerald-300'
+                                  }`}>
+                                    {isAway
+                                      ? 'Сворачивание окна / Переключение вкладки'
+                                      : isBack
+                                      ? 'Возврат в окно задания'
+                                      : isPaste
+                                      ? 'Вставка фрагмента кода из буфера обмена'
+                                      : isError
+                                      ? 'Ошибка компиляции или непройденный тест'
+                                      : 'Успешная сдача и компиляция задания'}
+                                  </span>
+                                  <span className="text-[11px] font-mono text-slate-500 shrink-0">{timeStr}</span>
+                                </div>
+
+                                <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">{ev.details}</p>
+
+                                {ev.errorMessage && (
+                                  <pre className="mt-1.5 p-2 bg-slate-950 rounded border border-rose-500/30 text-rose-300 font-mono text-[11px] overflow-x-auto">
+                                    {ev.errorMessage}
+                                  </pre>
+                                )}
+
+                                {ev.taskTitle && (
+                                  <span className="inline-block mt-1 text-[10px] text-slate-500 font-mono">
+                                    Задание: {ev.taskTitle}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 3: CODE SNIPPET & COMPILER DIAGNOSTICS */}
+                {dossierTab === 'code' && (
+                  <div className="space-y-4">
+                    {/* Compiler Error Diagnostics Callout */}
+                    {student.lastErrorMessage && (
+                      <div className="p-4 bg-rose-950/40 border border-rose-500/40 rounded-xl space-y-1.5 shadow-lg">
+                        <div className="flex items-center gap-2 text-xs font-bold text-rose-300">
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                          <span>Диагностика последней ошибки компилятора (.NET / Roslyn):</span>
+                        </div>
+                        <pre className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-rose-300 font-mono text-xs overflow-x-auto whitespace-pre-wrap">
+                          {student.lastErrorMessage}
+                        </pre>
+                      </div>
+                    )}
+
+                    {/* Student Code Box */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+                          <FileCode className="w-4 h-4 text-indigo-400" />
+                          <span>Последний запущенный / вставленный код (Program.cs):</span>
+                        </div>
+                        <span className="text-[11px] font-mono text-slate-500">C# .NET 9</span>
+                      </div>
+
+                      {student.lastCodeSnippet ? (
+                        <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden font-mono text-xs">
+                          <div className="bg-slate-900/80 px-4 py-2 border-b border-slate-800 flex items-center justify-between text-slate-400 text-[11px]">
+                            <span>Program.cs</span>
+                            <span>{student.lastCodeSnippet.split('\n').length} строк</span>
+                          </div>
+                          <div className="p-4 overflow-x-auto flex gap-3 text-slate-200">
+                            <div className="select-none text-right text-slate-600 font-mono text-xs pt-0.5 leading-relaxed shrink-0 pr-2 border-r border-slate-800">
+                              {student.lastCodeSnippet.split('\n').map((_, i) => (
+                                <div key={i}>{i + 1}</div>
+                              ))}
+                            </div>
+                            <pre className="font-mono text-xs leading-relaxed whitespace-pre text-indigo-300">
+                              {student.lastCodeSnippet}
+                            </pre>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-8 text-center bg-slate-950/40 rounded-xl border border-slate-800 space-y-2">
+                          <FileCode className="w-8 h-8 mx-auto text-slate-600" />
+                          <p className="text-xs text-slate-400">Студент еще не компилировал и не вставлял код в текущей сессии.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+              </div>
+
+              {/* Dossier Footer Actions */}
+              <div className="p-4 border-t border-slate-800 bg-slate-950/70 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-slate-400">
+                  <span>Последняя активность: <strong className="text-slate-200 font-mono">{student.lastActive || 'В сети'}</strong></span>
+                </div>
+
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedStudentForDossier(null);
+                      setSelectedStudentForHelp(student);
+                      setHelpCommentInput(student.helpMessage ? `Подсказка: ` : '');
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Отправить подсказку</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudentForDossier(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition-all"
+                  >
+                    Закрыть
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
