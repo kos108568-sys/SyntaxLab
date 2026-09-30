@@ -13,6 +13,9 @@ function getBody(req) {
 async function authenticatedStudent(req) {
   const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
   if (!token) throw new Error('Требуется вход.');
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('На Vercel не настроены SUPABASE_URL или SUPABASE_SERVICE_ROLE_KEY.');
+  }
   const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false }
   });
@@ -41,6 +44,9 @@ async function complete(db, studentId, taskId) {
 }
 
 async function runCsharp(code) {
+  if (!process.env.JDOODLE_CLIENT_ID || !process.env.JDOODLE_CLIENT_SECRET) {
+    return { exitCode: 1, output: '', error: 'На Vercel не настроены ключи JDoodle.' };
+  }
   const response = await fetch('https://api.jdoodle.com/v1/execute', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
