@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useCall
 import type { Session, User } from '@supabase/supabase-js';
 import type { Course, UserProfile, UserRole, Task, TelemetryEvent } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { initialCsharpCourse, sampleStudents } from '../data/csharpCourse';
+import { initialCsharpCourse } from '../data/csharpCourse';
 import {
   loadCourseFromSupabase,
   loadClassroomSessionsFromDb,
@@ -226,11 +226,21 @@ const getInitialClassroomStudents = (): ClassroomStudentState[] => {
       const saved = localStorage.getItem('syntaxlab_cached_classroom_sessions');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) {
+          // Исключаем старые моковые данные и преподавателя
+          const realOnly = parsed.filter((s: any) => 
+            s && s.id &&
+            !s.id.startsWith('stud-') &&
+            s.email !== 'a.smirnov@university.edu' &&
+            s.groupName !== 'Преподавательский состав' &&
+            !TEACHER_GITHUB_LOGINS.some(t => (s.email || '').toLowerCase().includes(t))
+          );
+          return realOnly;
+        }
       }
     } catch {}
   }
-  return sampleStudents as unknown as ClassroomStudentState[];
+  return [];
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -433,7 +443,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           console.warn('Error loading course:', err);
           return null;
         }),
-        loadClassroomSessionsFromDb('ИТ-301').catch(err => {
+        loadClassroomSessionsFromDb().catch(err => {
           console.warn('Error loading sessions:', err);
           return [];
         }),
@@ -460,9 +470,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (dbSessions && dbSessions.length > 0) {
-        setStudentsInClass(dbSessions);
+        setStudentsInClass(dbSessions.filter(s => 
+          !s.id.startsWith('stud-') &&
+          s.email !== 'a.smirnov@university.edu' &&
+          !TEACHER_GITHUB_LOGINS.some(t => (s.email || '').toLowerCase().includes(t))
+        ));
       } else {
-        setStudentsInClass(prev => prev.length > 0 ? prev : (sampleStudents as unknown as ClassroomStudentState[]));
+        setStudentsInClass(prev => prev.filter(s => 
+          !s.id.startsWith('stud-') &&
+          s.email !== 'a.smirnov@university.edu' &&
+          !TEACHER_GITHUB_LOGINS.some(t => (s.email || '').toLowerCase().includes(t))
+        ));
       }
 
       // Проверяем актуальный статус профиля
@@ -603,7 +621,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 4. Подписка на Realtime аудиторный радар
   useEffect(() => {
     if (session && isSupabaseConfigured) {
-      const unsubscribe = subscribeToClassroomRealtime('ИТ-301', () => {
+      const unsubscribe = subscribeToClassroomRealtime('global', () => {
         reloadFromDb();
       });
       return () => {
@@ -633,7 +651,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCompletedTaskIds(prev => [...prev, taskId]);
     }
 
-    if (currentUser?.id) {
+    if (currentUser?.id && currentUser.role !== 'teacher') {
       const activeLesson = course?.modules.flatMap(m => m.lessons).find(l => l.tasks.some(t => t.id === taskId));
       saveProgressToDb(currentUser.id, taskId, activeLesson?.id || '', xpEarned);
       updateSessionInDb(currentUser.id, taskId, 'completed_step', false);
@@ -641,14 +659,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const reportTaskAttempt = (taskId: string, success: boolean) => {
-    if (currentUser?.id) {
+    if (currentUser?.id && currentUser.role !== 'teacher') {
       const isStuck = !success;
       updateSessionInDb(currentUser.id, taskId, isStuck ? 'stuck' : 'active', false);
     }
   };
 
   const recordStudentTelemetry = useCallback((event: TelemetryEvent, dataUpdate?: Partial<ClassroomStudentState>) => {
-    const studentId = currentUser?.id || 'live-current-student';
+    // Преподаватель/админ не является студентом и не регистрируется в телеметрии
+    if (!currentUser || currentUser.role === 'teacher') return;
+    const userEmail = (currentUser.email || '').toLowerCase();
+    if (TEACHER_GITHUB_LOGINS.some(t => userEmail.includes(t))) return;
+
+    const studentId = currentUser.id;
 
     setStudentsInClass(prev => {
       const idx = prev.findIndex(s => s.id === studentId);
@@ -671,10 +694,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastActive: new Date().toLocaleTimeString()
       } : {
         id: studentId,
-        fullName: currentUser?.fullName || 'Студент',
-        avatarUrl: currentUser?.avatarUrl,
-        email: currentUser?.email || 'student@university.edu',
-        groupName: currentUser?.groupName || 'ИТ-301',
+        fullName: currentUser.fullName || 'Студент',
+        avatarUrl: currentUser.avatarUrl,
+        email: currentUser.email || '',
+        groupName: currentUser.groupName || 'Без группы',
         currentTaskId: event.taskId || '',
         currentTaskTitle: event.taskTitle || '',
         currentLessonTitle: '',
@@ -682,8 +705,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         attemptsOnCurrentTask: 1,
         timeOnCurrentTaskMinutes: 1,
         needsHelp: false,
-        totalXp: currentUser?.totalXp || 0,
-        streakDays: currentUser?.currentStreakDays || 1,
+        totalXp: currentUser.totalXp || 0,
+        streakDays: currentUser.currentStreakDays || 1,
         lastActive: new Date().toLocaleTimeString(),
         tabSwitchCount: dataUpdate?.tabSwitchCount || 0,
         totalAwaySeconds: dataUpdate?.totalAwaySeconds || 0,
@@ -715,7 +738,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentUser]);
 
   const requestTeacherHelp = (message: string) => {
-    if (currentUser?.id) {
+    if (currentUser?.id && currentUser.role !== 'teacher') {
       updateSessionInDb(currentUser.id, currentUser.currentTaskId || 'task-1-1-1', 'stuck', true, message);
     }
   };

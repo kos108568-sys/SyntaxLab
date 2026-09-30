@@ -125,7 +125,7 @@ export const StudentView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-bold text-white tracking-tight">{currentUser.fullName}</h1>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
-                  {currentUser.groupName || 'ИТ-301'}
+                  {currentUser.groupName || 'Без группы'}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">

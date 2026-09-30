@@ -106,11 +106,11 @@ export async function loadCourseFromSupabase(courseId = 'csharp-foundations'): P
 }
 
 // 2. Получение активных аудиторных сессий из Supabase
-export async function loadClassroomSessionsFromDb(groupName = 'ИТ-301'): Promise<ClassroomStudentState[]> {
+export async function loadClassroomSessionsFromDb(groupName?: string): Promise<ClassroomStudentState[]> {
   if (!isSupabaseConfigured) return [];
 
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('classroom_sessions')
       .select(`
         id,
@@ -124,13 +124,26 @@ export async function loadClassroomSessionsFromDb(groupName = 'ИТ-301'): Promi
         help_message,
         teacher_comment,
         last_ping_at,
+        tab_switch_count,
+        total_away_seconds,
+        paste_count,
+        pasted_chars_total,
+        is_currently_away,
+        total_errors_count,
+        total_attempts_count,
+        completed_tasks_count,
+        last_code_snippet,
+        last_error_message,
+        events_log,
         profiles (
           id,
           full_name,
           email,
           avatar_url,
           total_xp,
-          streak_days
+          streak_days,
+          group_name,
+          role
         ),
         tasks (
           id,
@@ -140,44 +153,59 @@ export async function loadClassroomSessionsFromDb(groupName = 'ИТ-301'): Promi
             title
           )
         )
-      `)
-      .eq('group_name', groupName);
+      `);
+
+    if (groupName && groupName !== 'all') {
+      query = query.eq('group_name', groupName);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.warn('Error loading classroom sessions:', error);
       return [];
     }
 
-    return (data || []).map((row: any) => ({
-      id: row.user_id,
-      fullName: row.profiles?.full_name || 'Студент',
-      avatarUrl: row.profiles?.avatar_url,
-      email: row.profiles?.email || '',
-      groupName: row.group_name,
-      currentTaskId: row.active_task_id || '',
-      currentTaskTitle: row.tasks?.title || 'Практическое задание',
-      currentLessonTitle: row.tasks?.lessons?.title || 'Текущий урок',
-      status: row.status,
-      attemptsOnCurrentTask: row.attempts_on_current_task || 0,
-      timeOnCurrentTaskMinutes: row.time_on_current_task_minutes || 0,
-      needsHelp: Boolean(row.needs_help),
-      helpMessage: row.help_message,
-      teacherComment: row.teacher_comment,
-      totalXp: row.profiles?.total_xp || 0,
-      streakDays: row.profiles?.streak_days || 0,
-      lastActive: new Date(row.last_ping_at).toLocaleTimeString(),
-      tabSwitchCount: row.tab_switch_count || 0,
-      totalAwaySeconds: row.total_away_seconds || 0,
-      pasteCount: row.paste_count || 0,
-      pastedCharsTotal: row.pasted_chars_total || 0,
-      isCurrentlyAway: Boolean(row.is_currently_away),
-      totalErrorsCount: row.total_errors_count || 0,
-      totalAttemptsCount: row.total_attempts_count || 0,
-      completedTasksCount: row.completed_tasks_count || 0,
-      lastCodeSnippet: row.last_code_snippet,
-      lastErrorMessage: row.last_error_message,
-      eventsLog: Array.isArray(row.events_log) ? row.events_log : []
-    }));
+    return (data || [])
+      // Исключаем преподавателя/админа из студенческих сессий
+      .filter((row: any) => {
+        if (!row.profiles) return false;
+        if (row.profiles.role === 'teacher') return false;
+        const email = (row.profiles.email || '').toLowerCase();
+        if (email.includes('kos108568')) return false;
+        return true;
+      })
+      .map((row: any) => ({
+        id: row.user_id,
+        fullName: row.profiles?.full_name || 'Студент',
+        avatarUrl: row.profiles?.avatar_url,
+        email: row.profiles?.email || '',
+        // Первоисточник группы - всегда профиль студента
+        groupName: row.profiles?.group_name || row.group_name || 'Без группы',
+        currentTaskId: row.active_task_id || '',
+        currentTaskTitle: row.tasks?.title || 'Практическое задание',
+        currentLessonTitle: row.tasks?.lessons?.title || 'Текущий урок',
+        status: row.status,
+        attemptsOnCurrentTask: row.attempts_on_current_task || 0,
+        timeOnCurrentTaskMinutes: row.time_on_current_task_minutes || 0,
+        needsHelp: Boolean(row.needs_help),
+        helpMessage: row.help_message,
+        teacherComment: row.teacher_comment,
+        totalXp: row.profiles?.total_xp || 0,
+        streakDays: row.profiles?.streak_days || 0,
+        lastActive: row.last_ping_at ? new Date(row.last_ping_at).toLocaleTimeString() : 'В сети',
+        tabSwitchCount: row.tab_switch_count || 0,
+        totalAwaySeconds: row.total_away_seconds || 0,
+        pasteCount: row.paste_count || 0,
+        pastedCharsTotal: row.pasted_chars_total || 0,
+        isCurrentlyAway: Boolean(row.is_currently_away),
+        totalErrorsCount: row.total_errors_count || 0,
+        totalAttemptsCount: row.total_attempts_count || 0,
+        completedTasksCount: row.completed_tasks_count || 0,
+        lastCodeSnippet: row.last_code_snippet,
+        lastErrorMessage: row.last_error_message,
+        eventsLog: Array.isArray(row.events_log) ? row.events_log : []
+      }));
   } catch (err) {
     console.error('Error in loadClassroomSessionsFromDb:', err);
     return [];

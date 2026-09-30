@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import type { ClassroomStudentState } from '../../context/AppContext';
 import type { Task, TaskType } from '../../types';
@@ -46,6 +46,8 @@ import {
   Laptop
 } from 'lucide-react';
 
+const TEACHER_LOGINS = ['kos108568-sys', 'kos108568'];
+
 export const calculateHonesty = (student: ClassroomStudentState) => {
   const switches = student.tabSwitchCount || 0;
   const pastes = student.pasteCount || 0;
@@ -71,6 +73,7 @@ export const AdminDashboard: React.FC = () => {
   const {
     studentsInClass,
     course,
+    currentUser,
     sendHelpResponse,
     clearStuckStatus,
     addNewTask,
@@ -94,11 +97,24 @@ export const AdminDashboard: React.FC = () => {
   const [fixSqlCopied, setFixSqlCopied] = useState(false);
   const [expandedModulesGroup, setExpandedModulesGroup] = useState<Record<string, boolean>>({});
 
+  // Task creation state
+  const [isAddingTask, setIsAddingTask] = useState(false);
+  const [selectedLessonId, setSelectedLessonId] = useState('');
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskType, setNewTaskType] = useState<TaskType>('code_challenge');
+  const [newTaskXp, setNewTaskXp] = useState(50);
+  const [newTaskInstructions, setNewTaskInstructions] = useState('');
+  const [newTaskStarterCode, setNewTaskStarterCode] = useState('// Ваш C# код здесь\n');
+
+  // Group Filters
+  const [radarGroup, setRadarGroup] = useState<string>('all');
+  const [gradebookGroup, setGradebookGroup] = useState<string>('all');
+  const [filterGroup, setFilterGroup] = useState<string>('all');
+
   // Groups and Students Moderation state
   const [academicGroups, setAcademicGroups] = useState<string[]>(['ИТ-301', 'ИТ-302', 'ПИ-201']);
   const [newGroupInput, setNewGroupInput] = useState('');
   const [allStudents, setAllStudents] = useState<any[]>([]);
-  const [filterGroup, setFilterGroup] = useState<string>('all');
   const [isProcessingStudent, setIsProcessingStudent] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -122,17 +138,107 @@ export const AdminDashboard: React.FC = () => {
     refreshStudentsAndGroups();
   }, [activeTab]);
 
-  // New task modal
-  const [isAddingTask, setIsAddingTask] = useState(false);
-  const [selectedLessonId, setSelectedLessonId] = useState<string>(course?.modules[0]?.lessons[0]?.id || '');
-  const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newTaskType, setNewTaskType] = useState<TaskType>('code_challenge');
-  const [newTaskInstructions, setNewTaskInstructions] = useState('');
-  const [newTaskStarterCode, setNewTaskStarterCode] = useState('using System;\n\nclass Program\n{\n    static void Main()\n    {\n        // Ваш код здесь\n    }\n}');
-  const [newTaskXp, setNewTaskXp] = useState(30);
+  // Проверка: является ли пользователь преподавателем/админом
+  const isTeacherProfile = (s: any) => {
+    if (!s) return false;
+    if (s.role === 'teacher') return true;
+    const email = (s.email || '').toLowerCase();
+    if (TEACHER_LOGINS.some(t => email.includes(t))) return true;
+    if (currentUser?.role === 'teacher' && s.id === currentUser.id) return true;
+    if (s.groupName === 'Преподавательский состав' || s.group_name === 'Преподавательский состав') return true;
+    return false;
+  };
 
-  const stuckStudents = studentsInClass.filter(s => s.status === 'stuck' || s.needsHelp);
-  const pendingStudents = allStudents.filter(s => !s.is_approved);
+  // Проверка: моковые студенты из старых шаблонов
+  const isMockStudent = (s: any) => {
+    if (!s || !s.id) return true;
+    return String(s.id).startsWith('stud-') || s.email === 'a.smirnov@university.edu';
+  };
+
+  // Все доступные группы из базы и профилей студентов
+  const allAvailableGroups = useMemo(() => {
+    const set = new Set<string>(academicGroups);
+    allStudents.forEach(s => {
+      if (s.group_name && !isTeacherProfile(s) && s.group_name !== 'Преподавательский состав') set.add(s.group_name);
+    });
+    studentsInClass.forEach(s => {
+      if (s.groupName && !isTeacherProfile(s) && s.groupName !== 'Преподавательский состав' && s.groupName !== 'Без группы') set.add(s.groupName);
+    });
+    return Array.from(set).filter(Boolean);
+  }, [academicGroups, allStudents, studentsInClass]);
+
+  // Только РЕАЛЬНЫЕ студенты из базы данных (без преподавателей и моков)
+  const realApprovedStudents = useMemo(() => {
+    return allStudents.filter(s => s.is_approved && !isTeacherProfile(s) && !isMockStudent(s));
+  }, [allStudents]);
+
+  // Только РЕАЛЬНЫЕ активные сессии (без преподавателя и моков)
+  const realSessions = useMemo(() => {
+    return studentsInClass.filter(s => !isTeacherProfile(s) && !isMockStudent(s));
+  }, [studentsInClass]);
+
+  // ЕДИНЫЙ МАППЕР СТУДЕНТА:
+  // Первоисточник информации о студенте (ФИО, группа, XP) ВСЕГДА берется из базы profiles (allStudents)!
+  // Это гарантирует 100% совпадение группы на дашборде, в радаре, журнале и во вкладке студентов.
+  const getUnifiedStudent = (student: any): ClassroomStudentState => {
+    const live = realSessions.find(sess => sess.id === student.id || (student.email && sess.email === student.email));
+    return {
+      id: student.id,
+      fullName: student.full_name || student.fullName || 'Студент',
+      avatarUrl: student.avatar_url || student.avatarUrl,
+      email: student.email || '',
+      // ВСЕГДА используем группу из профиля студента:
+      groupName: student.group_name || student.groupName || 'Без группы',
+      currentTaskId: live?.currentTaskId || '',
+      currentTaskTitle: live?.currentTaskTitle || 'Задание не начато',
+      currentLessonTitle: live?.currentLessonTitle || '',
+      status: live?.status || 'idle',
+      attemptsOnCurrentTask: live?.attemptsOnCurrentTask || 0,
+      timeOnCurrentTaskMinutes: live?.timeOnCurrentTaskMinutes || 0,
+      needsHelp: live?.needsHelp || false,
+      helpMessage: live?.helpMessage,
+      teacherComment: live?.teacherComment,
+      totalXp: student.total_xp ?? live?.totalXp ?? 0,
+      streakDays: student.streak_days ?? live?.streakDays ?? 0,
+      lastActive: live?.lastActive || 'Оффлайн',
+      tabSwitchCount: live?.tabSwitchCount || 0,
+      totalAwaySeconds: live?.totalAwaySeconds || 0,
+      pasteCount: live?.pasteCount || 0,
+      pastedCharsTotal: live?.pastedCharsTotal || 0,
+      isCurrentlyAway: live?.isCurrentlyAway || false,
+      totalErrorsCount: live?.totalErrorsCount || 0,
+      totalAttemptsCount: live?.totalAttemptsCount || 0,
+      completedTasksCount: live?.completedTasksCount || 0,
+      lastCodeSnippet: live?.lastCodeSnippet,
+      lastErrorMessage: live?.lastErrorMessage,
+      eventsLog: live?.eventsLog || []
+    };
+  };
+
+  // Студенты для Аудиторного Радара
+  const radarStudents: ClassroomStudentState[] = useMemo(() => {
+    if (realApprovedStudents.length > 0) {
+      return realApprovedStudents
+        .filter(s => radarGroup === 'all' || s.group_name === radarGroup)
+        .map(getUnifiedStudent);
+    }
+    return realSessions
+      .filter(s => radarGroup === 'all' || s.groupName === radarGroup);
+  }, [realApprovedStudents, realSessions, radarGroup]);
+
+  // Студенты для Журнала Успеваемости
+  const gradebookStudents: ClassroomStudentState[] = useMemo(() => {
+    if (realApprovedStudents.length > 0) {
+      return realApprovedStudents
+        .filter(s => gradebookGroup === 'all' || s.group_name === gradebookGroup)
+        .map(getUnifiedStudent);
+    }
+    return realSessions
+      .filter(s => gradebookGroup === 'all' || s.groupName === gradebookGroup);
+  }, [realApprovedStudents, realSessions, gradebookGroup]);
+
+  const stuckStudents = radarStudents.filter(s => s.status === 'stuck' || s.needsHelp);
+  const pendingStudents = allStudents.filter(s => !s.is_approved && !isTeacherProfile(s) && !isMockStudent(s));
 
   const handleSendHint = (e: React.FormEvent) => {
     e.preventDefault();
@@ -523,10 +629,10 @@ end $$;`;
             <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
               <div>
                 <p className="text-[11px] text-slate-400 font-medium">Студентов в аудитории</p>
-                <p className="text-2xl font-bold text-white mt-1">{studentsInClass.length}</p>
-                <p className="text-[10px] text-emerald-400 mt-1 flex items-center gap-1">
+                <p className="text-2xl font-bold text-white mt-1">{radarStudents.length}</p>
+                <p className="text-[10px] text-emerald-400 mt-1 flex items-center gap-1 font-mono">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                  Группа ИТ-301
+                  {radarGroup === 'all' ? 'Все группы' : `Группа ${radarGroup}`}
                 </p>
               </div>
               <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
@@ -551,10 +657,10 @@ end $$;`;
               <div>
                 <p className="text-[11px] text-slate-400 font-medium">Смен окон (Anti-cheat)</p>
                 <p className="text-2xl font-bold text-indigo-300 mt-1 font-mono">
-                  {studentsInClass.reduce((acc, s) => acc + (s.tabSwitchCount || 0), 0)}
+                  {radarStudents.reduce((acc, s) => acc + (s.tabSwitchCount || 0), 0)}
                 </p>
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Вставок из буфера: {studentsInClass.reduce((acc, s) => acc + (s.pasteCount || 0), 0)}
+                  Вставок из буфера: {radarStudents.reduce((acc, s) => acc + (s.pasteCount || 0), 0)}
                 </p>
               </div>
               <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
@@ -566,10 +672,10 @@ end $$;`;
               <div>
                 <p className="text-[11px] text-slate-400 font-medium">Всего ошибок / сбоев</p>
                 <p className="text-2xl font-bold text-purple-300 mt-1 font-mono">
-                  {studentsInClass.reduce((acc, s) => acc + (s.totalErrorsCount || 0), 0)}
+                  {radarStudents.reduce((acc, s) => acc + (s.totalErrorsCount || 0), 0)}
                 </p>
                 <p className="text-[10px] text-purple-400 mt-1">
-                  Сдано заданий: +{studentsInClass.reduce((acc, s) => acc + (s.completedTasksCount || 0), 0)}
+                  Сдано заданий: +{radarStudents.reduce((acc, s) => acc + (s.completedTasksCount || 0), 0)}
                 </p>
               </div>
               <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
@@ -581,10 +687,10 @@ end $$;`;
               <div>
                 <p className="text-[11px] text-slate-400 font-medium">Свернули окно сейчас</p>
                 <p className="text-2xl font-bold text-rose-400 mt-1 font-mono">
-                  {studentsInClass.filter(s => s.isCurrentlyAway).length}
+                  {radarStudents.filter(s => s.isCurrentlyAway).length}
                 </p>
                 <p className="text-[10px] text-rose-300/80 mt-1">
-                  {studentsInClass.filter(s => s.isCurrentlyAway).length > 0 ? 'Вне активной вкладки' : 'Все в окне кода'}
+                  {radarStudents.filter(s => s.isCurrentlyAway).length > 0 ? 'Вне активной вкладки' : 'Все в окне кода'}
                 </p>
               </div>
               <div className="w-9 h-9 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
@@ -595,31 +701,50 @@ end $$;`;
 
           {/* The Live Matrix of Students */}
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                <span>Мониторинг аудитории (Парты / Рабочие места)</span>
-                <span className="text-xs font-mono font-normal text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                  Live sync
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <span>Мониторинг аудитории (Парты / Рабочие места)</span>
+                  <span className="text-xs font-mono font-normal text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                    Live sync
+                  </span>
+                </h2>
+                <span className="text-xs text-slate-400">
+                  Только реальные данные студентов. Кликните «Досье» для просмотра истории переключений, ошибок и написанного кода.
                 </span>
-              </h2>
-              <span className="text-xs text-slate-400 hidden sm:inline">
-                Кликните «Досье» для просмотра истории переключений, ошибок и написанного кода
-              </span>
+              </div>
+
+              {/* Group filter for Radar */}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-400">Группа:</span>
+                <select
+                  value={radarGroup}
+                  onChange={(e) => setRadarGroup(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+                >
+                  <option value="all">Все группы ({realApprovedStudents.length})</option>
+                  {allAvailableGroups.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {studentsInClass.length === 0 ? (
+              {radarStudents.length === 0 ? (
                 <div className="col-span-full bg-slate-900/60 border border-slate-800 rounded-2xl p-10 text-center space-y-3">
                   <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
                     <Radio className="w-6 h-6 animate-pulse" />
                   </div>
-                  <h3 className="text-sm font-bold text-white">Аудиторный радар активен (Ожидание студентов)</h3>
+                  <h3 className="text-sm font-bold text-white">Аудиторный радар активен (Нет активных сессий)</h3>
                   <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-                    Когда студенты группы <strong>ИТ-301</strong> войдут через свой GitHub и откроют практические задания, их карточки с кодом, таймером и статусом появятся здесь автоматически в реальном времени.
+                    {radarGroup === 'all'
+                      ? 'В системе пока нет подтвержденных студентов или активных сессий. Когда студенты авторизуются через GitHub и начнут выполнение заданий, они появятся здесь автоматически.'
+                      : `В группе ${radarGroup} пока нет активных сессий или подтвержденных студентов. Выберите другую группу или подтвердите заявки во вкладке "Студенты и Группы".`}
                   </p>
                 </div>
               ) : (
-                studentsInClass.map((student) => {
+                radarStudents.map((student) => {
                   const isStuck = student.status === 'stuck' || student.needsHelp;
                   const isCompleted = student.status === 'completed_step';
                   const honesty = calculateHonesty(student);
@@ -1134,8 +1259,8 @@ end $$;`;
                   onChange={(e) => setFilterGroup(e.target.value)}
                   className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
                 >
-                  <option value="all">Все группы ({allStudents.filter(s => s.is_approved).length})</option>
-                  {academicGroups.map((g) => (
+                  <option value="all">Все группы ({realApprovedStudents.length})</option>
+                  {allAvailableGroups.map((g) => (
                     <option key={g} value={g}>{g}</option>
                   ))}
                 </select>
@@ -1157,13 +1282,12 @@ end $$;`;
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 bg-slate-900/40">
-                  {allStudents
-                    .filter(s => s.is_approved && (filterGroup === 'all' || s.group_name === filterGroup))
+                  {realApprovedStudents
+                    .filter(s => filterGroup === 'all' || s.group_name === filterGroup)
                     .map((student) => {
-                      const liveSession = studentsInClass.find(s => s.id === student.id || s.email === student.email);
-                      const honesty = liveSession 
-                        ? calculateHonesty(liveSession) 
-                        : { score: 100, badgeText: '100%', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+                      const unified = getUnifiedStudent(student);
+                      const liveSession = realSessions.find(s => s.id === student.id || (student.email && s.email === student.email));
+                      const honesty = calculateHonesty(unified);
 
                       return (
                         <tr key={student.id} className="hover:bg-slate-950/40 transition-colors">
@@ -1191,20 +1315,20 @@ end $$;`;
                             </span>
                           </td>
                           <td className="px-3 py-3 text-center font-mono font-bold text-emerald-400">
-                            +{liveSession?.completedTasksCount ?? 0}
+                            +{unified.completedTasksCount ?? 0}
                           </td>
                           <td className="px-3 py-3 text-center font-mono">
-                            <span className={`font-semibold ${(liveSession?.totalErrorsCount || 0) > 3 ? 'text-rose-400' : (liveSession?.totalErrorsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
-                              {liveSession?.totalErrorsCount ?? 0}
+                            <span className={`font-semibold ${(unified.totalErrorsCount || 0) > 3 ? 'text-rose-400' : (unified.totalErrorsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                              {unified.totalErrorsCount ?? 0}
                             </span>
                           </td>
                           <td className="px-3 py-3 text-center font-mono">
-                            <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold ${(liveSession?.tabSwitchCount || 0) > 3 ? 'text-rose-400 bg-rose-500/10' : (liveSession?.tabSwitchCount || 0) > 0 ? 'text-amber-400 bg-amber-500/10' : 'text-slate-400'}`}>
-                              {liveSession?.tabSwitchCount ?? 0}
+                            <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold ${(unified.tabSwitchCount || 0) > 3 ? 'text-rose-400 bg-rose-500/10' : (unified.tabSwitchCount || 0) > 0 ? 'text-amber-400 bg-amber-500/10' : 'text-slate-400'}`}>
+                              {unified.tabSwitchCount ?? 0}
                             </span>
                           </td>
                           <td className="px-3 py-3 text-center font-mono text-purple-300">
-                            {liveSession?.pasteCount ?? 0}
+                            {unified.pasteCount ?? 0}
                           </td>
                           <td className="px-3 py-3 text-center font-mono">
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${honesty.color}`}>
@@ -1213,20 +1337,18 @@ end $$;`;
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="inline-flex items-center gap-1.5">
-                              {liveSession && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedStudentForDossier(liveSession);
-                                    setDossierTab('summary');
-                                  }}
-                                  className="inline-flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors border border-slate-700/60"
-                                  title="Посмотреть полное досье студента"
-                                >
-                                  <Eye className="w-3 h-3 text-indigo-400" />
-                                  <span>Досье</span>
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedStudentForDossier(unified);
+                                  setDossierTab('summary');
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors border border-slate-700/60"
+                                title="Посмотреть полное досье студента"
+                              >
+                                <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                                <span>Досье</span>
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditStudent(student)}
@@ -1240,6 +1362,17 @@ end $$;`;
                         </tr>
                       );
                     })}
+                  {realApprovedStudents.filter(s => filterGroup === 'all' || s.group_name === filterGroup).length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                        <div className="flex flex-col items-center justify-center gap-1.5">
+                          <GraduationCap className="w-6 h-6 text-slate-600 mb-1" />
+                          <p className="text-xs font-medium text-slate-400">Нет одобренных студентов в выбранной группе</p>
+                          <p className="text-[11px] text-slate-600">Студенты появятся здесь после подтверждения заявки на доступ</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1289,7 +1422,7 @@ end $$;`;
                   onChange={(e) => setEditGroupName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer font-mono"
                 >
-                  {academicGroups.map((g) => (
+                  {allAvailableGroups.map((g) => (
                     <option key={g} value={g}>{g}</option>
                   ))}
                 </select>
@@ -1430,20 +1563,39 @@ end $$;`;
       {/* TAB 3: GRADEBOOK & ANALYTICS */}
       {activeTab === 'gradebook' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-bold text-white tracking-tight">Журнал успеваемости группы ИТ-301</h2>
+              <h2 className="text-lg font-bold text-white tracking-tight">
+                Журнал успеваемости {gradebookGroup === 'all' ? '(Все группы)' : `(Группа ${gradebookGroup})`}
+              </h2>
               <p className="text-xs text-slate-400">
-                Сводные показатели, набранные баллы (XP), количество попыток и активность.
+                Сводные показатели, набранные баллы (XP), количество попыток, смен окон и античит-индекс.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => alert('Экспорт ведомости в формате CSV / Excel сформирован')}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition-all"
-            >
-              Экспорт ведомости (CSV)
-            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-400">Группа:</span>
+                <select
+                  value={gradebookGroup}
+                  onChange={(e) => setGradebookGroup(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+                >
+                  <option value="all">Все группы ({realApprovedStudents.length})</option>
+                  {allAvailableGroups.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => alert('Экспорт ведомости в формате CSV / Excel сформирован')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition-all shrink-0"
+              >
+                Экспорт ведомости (CSV)
+              </button>
+            </div>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
@@ -1462,83 +1614,91 @@ end $$;`;
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {studentsInClass.map((student) => {
-                  const honesty = calculateHonesty(student);
+                {gradebookStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                      В выбранной группе пока нет студентов или активных сессий.
+                    </td>
+                  </tr>
+                ) : (
+                  gradebookStudents.map((student) => {
+                    const honesty = calculateHonesty(student);
 
-                  return (
-                    <tr key={student.id} className="hover:bg-slate-950/30 transition-colors">
-                      <td className="px-4 py-3 font-medium text-white flex items-center gap-2.5">
-                        <div className="relative">
-                          <img
-                            src={student.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
-                            alt=""
-                            className="w-7 h-7 rounded-full object-cover"
-                          />
-                          {student.isCurrentlyAway ? (
-                            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-slate-900" title="Вне вкладки" />
-                          ) : (
-                            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border border-slate-900" title="В активном окне" />
+                    return (
+                      <tr key={student.id} className="hover:bg-slate-950/30 transition-colors">
+                        <td className="px-4 py-3 font-medium text-white flex items-center gap-2.5">
+                          <div className="relative">
+                            <img
+                              src={student.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}
+                              alt=""
+                              className="w-7 h-7 rounded-full object-cover"
+                            />
+                            {student.isCurrentlyAway ? (
+                              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-rose-500 rounded-full border border-slate-900" title="Вне вкладки" />
+                            ) : (
+                              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border border-slate-900" title="В активном окне" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="font-semibold text-slate-100">{student.fullName}</div>
+                            <span className="text-[10px] text-slate-400 font-mono">{student.groupName}</span>
+                          </div>
+                        </td>
+
+                        <td className="px-3 py-3 text-center font-mono font-bold text-emerald-400">
+                          +{student.completedTasksCount || 0}
+                        </td>
+
+                        <td className="px-3 py-3 text-center font-mono">
+                          <span className={`font-semibold ${(student.totalErrorsCount || 0) > 3 ? 'text-rose-400' : (student.totalErrorsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                            {student.totalErrorsCount || 0}
+                          </span>
+                        </td>
+
+                        <td className="px-3 py-3 text-center font-mono">
+                          <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${(student.tabSwitchCount || 0) > 3 ? 'text-rose-400 bg-rose-500/10' : (student.tabSwitchCount || 0) > 0 ? 'text-amber-400 bg-amber-500/10' : 'text-slate-400'}`}>
+                            {student.tabSwitchCount || 0}
+                          </span>
+                        </td>
+
+                        <td className="px-3 py-3 text-center font-mono text-purple-300">
+                          <span>{student.pasteCount || 0}</span>
+                          {(student.pastedCharsTotal || 0) > 0 && (
+                            <span className="text-[10px] text-slate-500 block">({student.pastedCharsTotal} симв.)</span>
                           )}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-slate-100">{student.fullName}</div>
-                          <span className="text-[10px] text-slate-400 font-mono">{student.groupName}</span>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="px-3 py-3 text-center font-mono font-bold text-emerald-400">
-                        +{student.completedTasksCount || 0}
-                      </td>
+                        <td className="px-3 py-3 text-center font-mono">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${honesty.color}`}>
+                            {honesty.score}%
+                          </span>
+                        </td>
 
-                      <td className="px-3 py-3 text-center font-mono">
-                        <span className={`font-semibold ${(student.totalErrorsCount || 0) > 3 ? 'text-rose-400' : (student.totalErrorsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
-                          {student.totalErrorsCount || 0}
-                        </span>
-                      </td>
+                        <td className="px-4 py-3 font-semibold text-white font-mono">
+                          {student.totalXp} XP
+                        </td>
 
-                      <td className="px-3 py-3 text-center font-mono">
-                        <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${(student.tabSwitchCount || 0) > 3 ? 'text-rose-400 bg-rose-500/10' : (student.tabSwitchCount || 0) > 0 ? 'text-amber-400 bg-amber-500/10' : 'text-slate-400'}`}>
-                          {student.tabSwitchCount || 0}
-                        </span>
-                      </td>
+                        <td className="px-4 py-3 text-slate-300 max-w-[150px] truncate" title={student.currentTaskTitle}>
+                          {student.currentTaskTitle}
+                        </td>
 
-                      <td className="px-3 py-3 text-center font-mono text-purple-300">
-                        <span>{student.pasteCount || 0}</span>
-                        {(student.pastedCharsTotal || 0) > 0 && (
-                          <span className="text-[10px] text-slate-500 block">({student.pastedCharsTotal} симв.)</span>
-                        )}
-                      </td>
-
-                      <td className="px-3 py-3 text-center font-mono">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${honesty.color}`}>
-                          {honesty.score}%
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-3 font-semibold text-white font-mono">
-                        {student.totalXp} XP
-                      </td>
-
-                      <td className="px-4 py-3 text-slate-300 max-w-[150px] truncate" title={student.currentTaskTitle}>
-                        {student.currentTaskTitle}
-                      </td>
-
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedStudentForDossier(student);
-                            setDossierTab('summary');
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors border border-slate-700/60"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>Досье</span>
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedStudentForDossier(student);
+                              setDossierTab('summary');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors border border-slate-700/60"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>Досье</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

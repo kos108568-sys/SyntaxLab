@@ -23,8 +23,15 @@ export const Navbar: React.FC = () => {
     signOut 
   } = useApp();
 
-  const stuckCount = studentsInClass.filter(s => s.status === 'stuck' || s.needsHelp).length;
-  const onlineCount = studentsInClass.length;
+  const realStudents = studentsInClass.filter(s => 
+    s && s.id &&
+    !s.id.startsWith('stud-') &&
+    s.email !== 'a.smirnov@university.edu' &&
+    s.groupName !== 'Преподавательский состав' &&
+    !['kos108568-sys', 'kos108568'].some(t => (s.email || '').toLowerCase().includes(t))
+  );
+  const stuckCount = realStudents.filter(s => s.status === 'stuck' || s.needsHelp).length;
+  const onlineCount = realStudents.length;
 
   return (
     <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 text-slate-100">
@@ -108,7 +115,7 @@ export const Navbar: React.FC = () => {
               </span>
             )}
             <span className="text-slate-600">•</span>
-            <span className="text-slate-400 font-mono">Группа ИТ-301</span>
+            <span className="text-slate-400 font-mono">Мониторинг</span>
           </div>
         )}
 
@@ -146,7 +153,7 @@ export const Navbar: React.FC = () => {
           ) : (
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/10 border border-violet-500/20 text-violet-300 rounded-xl text-xs font-semibold">
               <GraduationCap className="w-3.5 h-3.5 text-violet-400" />
-              <span>Студент ({currentUser?.groupName || 'ИТ-301'})</span>
+              <span>Студент ({currentUser?.groupName || 'Без группы'})</span>
             </div>
           )}
 
