@@ -65,6 +65,21 @@ export const TaskPlayerModal: React.FC<TaskPlayerModalProps> = ({
   const [helpSent, setHelpSent] = useState(false);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
 
+  // Сброс всего состояния модалки при смене задания
+  useEffect(() => {
+    setCode(normalizeCode(task.initialCode));
+    setSelectedQuizOptionId(null);
+    setQuizSubmitted(false);
+    setRunResult(null);
+    setIsRunning(false);
+    setShowSuccessCelebration(false);
+    setShowHintIndex(null);
+    setIsAskingHelp(false);
+    setHelpQuestionText('');
+    setHelpSent(false);
+    setPasteNotice(null);
+  }, [task.id, task.initialCode]);
+
   const awayStartRef = useRef<number | null>(null);
   const isAwayRef = useRef(false);
 

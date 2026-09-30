@@ -78,7 +78,7 @@ export const AdminDashboard: React.FC = () => {
     clearStuckStatus,
     addNewTask,
     broadcastMessage,
-    setBroadcastMessage,
+    sendBroadcastMessage,
     isSupabaseConnected,
     availableCourses,
     groupCourseAccess,
@@ -248,11 +248,13 @@ export const AdminDashboard: React.FC = () => {
     setHelpCommentInput('');
   };
 
-  const handleBroadcast = (e: React.FormEvent) => {
+  const handleBroadcast = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAnnouncement.trim()) return;
-    setBroadcastMessage(newAnnouncement.trim());
+    const msg = newAnnouncement.trim();
     setNewAnnouncement('');
+    const targetGroup = radarGroup !== 'all' ? radarGroup : undefined;
+    await sendBroadcastMessage(msg, targetGroup);
   };
 
   const handleApproveStudent = async (studentId: string, fullName: string, groupName: string) => {
@@ -600,7 +602,10 @@ end $$;`;
             {broadcastMessage && (
               <button
                 type="button"
-                onClick={() => setBroadcastMessage(null)}
+                onClick={async () => {
+                  const targetGroup = radarGroup !== 'all' ? radarGroup : undefined;
+                  await sendBroadcastMessage('', targetGroup);
+                }}
                 className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg transition-all"
               >
                 Снять

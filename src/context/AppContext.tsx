@@ -15,7 +15,11 @@ import {
   toggleGroupCourseAccess,
   loadGroupModuleAccess,
   toggleGroupModuleAccess,
-  toggleAllGroupModules
+  toggleAllGroupModules,
+  loadActiveAnnouncementFromDb,
+  publishClassroomAnnouncement,
+  subscribeToAnnouncementsRealtime,
+  saveCustomTaskToDb
 } from '../services/supabaseService';
 
 export interface CourseMeta {
@@ -110,6 +114,7 @@ interface AppContextType {
   updateCourse: (course: Course) => void;
   broadcastMessage: string | null;
   setBroadcastMessage: (msg: string | null) => void;
+  sendBroadcastMessage: (msg: string, targetGroup?: string) => Promise<boolean>;
   
   // Auth & Stats
   signOut: () => Promise<void>;
@@ -336,11 +341,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const studentGroup = currentUser?.groupName || '';
     if (!studentGroup) return ALL_COURSES;
-    const allowedIds = groupCourseAccess[studentGroup];
-    if (!allowedIds || allowedIds.length === 0) {
-      return ALL_COURSES;
+
+    // Если для группы права уже загружены или заданы в объекте доступа
+    if (studentGroup in groupCourseAccess) {
+      const allowedIds = groupCourseAccess[studentGroup] || [];
+      // Если все курсы закрыты преподавателем, возвращаем пустой список (доступ закрыт)
+      return ALL_COURSES.filter(c => allowedIds.includes(c.id));
     }
-    return ALL_COURSES.filter(c => allowedIds.includes(c.id));
+    // Если группа новая или права еще не инициализированы
+    return ALL_COURSES;
   }, [role, currentUser, groupCourseAccess]);
 
   // Auto-switch to an allowed course if current activeCourseId is not permitted for the student
@@ -463,7 +472,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
       ]);
 
-      if (dbCourse && dbCourse.modules && dbCourse.modules.length >= initialCsharpCourse.modules.length) {
+      const dbTaskCount = (dbCourse?.modules || []).reduce((acc: number, m: any) => acc + (m.lessons || []).reduce((lacc: number, l: any) => lacc + (l.tasks?.length || 0), 0), 0);
+      const localTaskCount = initialCsharpCourse.modules.reduce((acc, m) => acc + m.lessons.reduce((lacc, l) => lacc + l.tasks.length, 0), 0);
+
+      if (dbCourse && dbTaskCount >= localTaskCount) {
         setCourse(dbCourse);
       } else {
         setCourse(initialCsharpCourse);
@@ -514,7 +526,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // Загрузка прав доступа групп к курсам
-      if (groupAccess && Object.keys(groupAccess).length > 0) {
+      if (groupAccess && typeof groupAccess === 'object') {
         setGroupCourseAccess(groupAccess);
         try {
           localStorage.setItem('syntaxlab_cached_group_access', JSON.stringify(groupAccess));
@@ -522,7 +534,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // Загрузка прав доступа групп к разделам (модулям)
-      if (groupModules && Object.keys(groupModules).length > 0) {
+      if (groupModules && typeof groupModules === 'object') {
         setGroupModuleAccess(groupModules);
         try {
           localStorage.setItem('syntaxlab_cached_group_module_access', JSON.stringify(groupModules));
@@ -647,21 +659,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const completeTask = (taskId: string, xpEarned: number) => {
-    if (!completedTaskIds.includes(taskId)) {
+    const isAlreadyCompleted = completedTaskIds.includes(taskId);
+    if (!isAlreadyCompleted) {
       setCompletedTaskIds(prev => [...prev, taskId]);
     }
 
     if (currentUser?.id && currentUser.role !== 'teacher') {
-      const activeLesson = course?.modules.flatMap(m => m.lessons).find(l => l.tasks.some(t => t.id === taskId));
-      saveProgressToDb(currentUser.id, taskId, activeLesson?.id || '', xpEarned);
-      updateSessionInDb(currentUser.id, taskId, 'completed_step', false);
+      let lessonId = course?.modules.flatMap(m => m.lessons).find(l => l.tasks.some(t => t.id === taskId))?.id;
+      if (!lessonId && (taskId.startsWith('intro') || taskId.startsWith('ramp') || taskId.startsWith('move') || taskId.startsWith('mixed') || taskId.startsWith('adv') || taskId.startsWith('rem'))) {
+        lessonId = 'git-lessons';
+      }
+      const xpToAward = isAlreadyCompleted ? 0 : xpEarned;
+      saveProgressToDb(currentUser.id, taskId, lessonId || null, xpToAward);
+      updateSessionInDb(currentUser.id, taskId, 'completed_step', false, undefined, currentUser.groupName);
     }
   };
 
   const reportTaskAttempt = (taskId: string, success: boolean) => {
     if (currentUser?.id && currentUser.role !== 'teacher') {
       const isStuck = !success;
-      updateSessionInDb(currentUser.id, taskId, isStuck ? 'stuck' : 'active', false);
+      updateSessionInDb(currentUser.id, taskId, isStuck ? 'stuck' : 'active', false, undefined, currentUser.groupName);
     }
   };
 
@@ -739,7 +756,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const requestTeacherHelp = (message: string) => {
     if (currentUser?.id && currentUser.role !== 'teacher') {
-      updateSessionInDb(currentUser.id, currentUser.currentTaskId || 'task-1-1-1', 'stuck', true, message);
+      updateSessionInDb(currentUser.id, currentUser.currentTaskId || 'task-1-1-1', 'stuck', true, message, currentUser.groupName);
     }
   };
 
@@ -748,10 +765,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const clearStuckStatus = (studentId: string) => {
-    updateSessionInDb(studentId, 'task-1-1-1', 'active', false);
+    const student = studentsInClass.find(s => s.id === studentId);
+    updateSessionInDb(studentId, 'task-1-1-1', 'active', false, undefined, student?.groupName);
   };
 
-  const addNewTask = (lessonId: string, newTask: Task) => {
+  const addNewTask = async (lessonId: string, newTask: Task) => {
     if (!course) return;
     setCourse(prev => {
       if (!prev) return null;
@@ -769,6 +787,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       return { ...prev, modules: newModules };
     });
+
+    if (isSupabaseConfigured) {
+      await saveCustomTaskToDb(newTask, lessonId);
+    }
+  };
+
+  // Подписка на объявления преподавателя
+  useEffect(() => {
+    if (!session || !isSupabaseConfigured) return;
+    const group = currentUser?.groupName || 'all';
+    loadActiveAnnouncementFromDb(group).then(msg => {
+      if (msg) setBroadcastMessage(msg);
+    });
+
+    const unsubscribe = subscribeToAnnouncementsRealtime(group, (msg) => {
+      setBroadcastMessage(msg);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [session, currentUser?.groupName]);
+
+  const sendBroadcastMessage = async (message: string, targetGroup?: string): Promise<boolean> => {
+    const group = targetGroup || currentUser?.groupName || 'all';
+    setBroadcastMessage(message.trim() || null);
+    if (isSupabaseConfigured) {
+      return await publishClassroomAnnouncement(group, message, currentUser?.id);
+    }
+    return true;
   };
 
   const updateCourse = (newCourse: Course) => {
@@ -807,6 +855,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateCourse,
         broadcastMessage,
         setBroadcastMessage,
+        sendBroadcastMessage,
         signOut,
         isLoadingAuth,
         isSupabaseConnected: isSupabaseConfigured,

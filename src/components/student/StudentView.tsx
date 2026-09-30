@@ -355,6 +355,7 @@ export const StudentView: React.FC = () => {
       {/* Task Modal Runner */}
       {activeTask && (
         <TaskPlayerModal
+          key={activeTask.task.id}
           task={activeTask.task}
           lesson={activeTask.lesson}
           onClose={() => setActiveTask(null)}

@@ -54,14 +54,56 @@ $$;
 
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = '' as $$
+declare
+  assigned_role text := 'student';
+  is_auto_approved boolean := false;
+  assigned_group text := null;
 begin
-  insert into public.profiles(id,email,full_name,role,group_name,is_approved)
-  values(new.id,coalesce(new.email,''),coalesce(new.raw_user_meta_data->>'full_name',new.raw_user_meta_data->>'user_name','Студент'),'student',null,false)
-  on conflict(id) do nothing;
+  if lower(coalesce(new.email,'')) in ('kos108568@gmail.com')
+     or lower(coalesce(new.raw_user_meta_data->>'user_name','')) in ('kos108568-sys','kos108568') then
+    assigned_role := 'teacher';
+    is_auto_approved := true;
+    assigned_group := 'Преподавательский состав';
+  end if;
+
+  insert into public.profiles(id,email,full_name,role,group_name,is_approved,total_xp,streak_days)
+  values(
+    new.id,
+    coalesce(new.email,''),
+    coalesce(new.raw_user_meta_data->>'full_name',new.raw_user_meta_data->>'user_name','Студент'),
+    assigned_role,
+    assigned_group,
+    is_auto_approved,
+    case when assigned_role = 'teacher' then 1000 else 0 end,
+    1
+  )
+  on conflict(id) do update set
+    email = excluded.email,
+    full_name = coalesce(public.profiles.full_name, excluded.full_name);
   return new;
 end; $$;
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
+
+-- Блокировка попыток студентов самостоятельно повысить себе привилегии или изменить статус одобрения
+create or replace function public.protect_profile_columns() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_teacher() then
+    if new.role is distinct from old.role then
+      raise exception 'Запрещено самостоятельно менять роль профиля';
+    end if;
+    if new.is_approved is distinct from old.is_approved then
+      raise exception 'Запрещено самостоятельно менять статус одобрения';
+    end if;
+    if new.total_xp is distinct from old.total_xp then
+      raise exception 'Запрещено изменять опыт напрямую';
+    end if;
+  end if;
+  return new;
+end; $$;
+drop trigger if exists protect_profile_columns_trg on public.profiles;
+create trigger protect_profile_columns_trg before update on public.profiles for each row execute function public.protect_profile_columns();
 
 -- Replace every legacy permissive policy, including names from earlier schema versions.
 do $$ declare p record; t text; begin
@@ -199,6 +241,23 @@ begin
   where user_id=auth.uid();
 end; $$;
 
+create or replace function public.increment_xp(user_id uuid, amount integer) returns integer
+language plpgsql security definer set search_path = '' as $$
+declare
+  safe_amount integer := greatest(0, least(1000, coalesce(amount, 0)));
+  new_total integer;
+begin
+  if auth.uid() is null then raise exception 'Требуется авторизация'; end if;
+  if auth.uid() <> user_id and not public.is_teacher() then
+    raise exception 'Запрещено начислять опыт другим пользователям';
+  end if;
+  update public.profiles
+  set total_xp = coalesce(total_xp, 0) + safe_amount
+  where id = user_id
+  returning total_xp into new_total;
+  return new_total;
+end; $$;
+
 create or replace function public.create_task(payload jsonb) returns void
 language plpgsql security definer set search_path = '' as $$
 declare options jsonb := coalesce(payload->'quizOptions','[]'); checks jsonb := coalesce(payload->'tests','[]');
@@ -223,7 +282,7 @@ do $$ declare f record; begin
     where n.nspname='public' and p.proname=any(array['is_teacher','can_access_course','can_access_module','can_access_task','handle_new_user','session_group','submit_onboarding','approve_student','edit_student','reject_student','complete_verified_task','send_teacher_hint','publish_announcement','record_telemetry','create_task','increment_xp']) loop
     execute format('revoke all on function %s from public,anon,authenticated',f.signature);
     execute format('grant execute on function %s to service_role',f.signature);
-    if f.proname not in ('complete_verified_task','increment_xp','handle_new_user','session_group') then execute format('grant execute on function %s to authenticated',f.signature); end if;
+    if f.proname not in ('complete_verified_task','handle_new_user','session_group') then execute format('grant execute on function %s to authenticated',f.signature); end if;
   end loop;
 end $$;
 

@@ -213,23 +213,38 @@ export async function loadClassroomSessionsFromDb(groupName?: string): Promise<C
 }
 
 // 3. Сохранение прогресса решения задачи в Supabase
-export async function saveProgressToDb(userId: string, taskId: string, lessonId: string, xpEarned: number) {
+export async function saveProgressToDb(userId: string, taskId: string, lessonId: string | null, xpEarned: number) {
   if (!isSupabaseConfigured) return;
 
   try {
-    await supabase.from('student_progress').upsert({
+    const payload: any = {
       user_id: userId,
       task_id: taskId,
-      lesson_id: lessonId,
       status: 'completed',
       completed_at: new Date().toISOString()
-    });
+    };
+    if (lessonId) {
+      payload.lesson_id = lessonId;
+    }
 
-    // Добавляем XP в профиль студента
-    try {
-      await supabase.rpc('increment_xp', { user_id: userId, amount: xpEarned });
-    } catch {
-      // Игнорируем если RPC функция не создана
+    const { error } = await supabase
+      .from('student_progress')
+      .upsert(payload, { onConflict: 'user_id,task_id' });
+
+    if (error) {
+      console.error('Error saving progress to student_progress:', error);
+    }
+
+    // Добавляем XP в профиль студента только если задание новое и заработаны очки
+    if (xpEarned > 0) {
+      try {
+        const { error: rpcErr } = await supabase.rpc('increment_xp', { user_id: userId, amount: xpEarned });
+        if (rpcErr) {
+          console.warn('RPC increment_xp returned error:', rpcErr);
+        }
+      } catch {
+        // Игнорируем если RPC функция не создана
+      }
     }
   } catch (err) {
     console.error('Error saving progress:', err);
@@ -242,19 +257,31 @@ export async function updateSessionInDb(
   taskId: string,
   status: 'active' | 'stuck' | 'completed_step' | 'idle',
   needsHelp = false,
-  helpMessage?: string
+  helpMessage?: string,
+  groupName?: string
 ) {
   if (!isSupabaseConfigured) return;
 
   try {
-    await supabase.from('classroom_sessions').upsert({
+    const payload: any = {
       user_id: userId,
       active_task_id: taskId,
       status,
       needs_help: needsHelp,
       help_message: helpMessage,
       last_ping_at: new Date().toISOString()
-    });
+    };
+    if (groupName) {
+      payload.group_name = groupName;
+    }
+
+    const { error } = await supabase
+      .from('classroom_sessions')
+      .upsert(payload, { onConflict: 'user_id' });
+
+    if (error) {
+      console.warn('Error updating session in classroom_sessions:', error);
+    }
   } catch (err) {
     console.error('Error updating session:', err);
   }
@@ -263,11 +290,24 @@ export async function updateSessionInDb(
 // 4.1 Обновление расширенной телеметрии (сворачивание окон, вставки, ошибки)
 export async function updateSessionTelemetryInDb(
   userId: string,
-  _event?: any,
+  event?: any,
   dataUpdate?: any
 ) {
   if (!isSupabaseConfigured) return;
   try {
+    // 1. Попытка через безопасную RPC функцию record_telemetry
+    if (event && event.id) {
+      const { error: rpcErr } = await supabase.rpc('record_telemetry', {
+        event,
+        patch: {
+          lastCodeSnippet: dataUpdate?.lastCodeSnippet,
+          lastErrorMessage: dataUpdate?.lastErrorMessage
+        }
+      });
+      if (!rpcErr) return;
+    }
+
+    // 2. Прямой upsert в classroom_sessions с разрешением конфликта по user_id
     const payload: any = {
       user_id: userId,
       last_ping_at: new Date().toISOString()
@@ -282,6 +322,7 @@ export async function updateSessionTelemetryInDb(
     if (dataUpdate?.completedTasksCount !== undefined) payload.completed_tasks_count = dataUpdate.completedTasksCount;
     if (dataUpdate?.lastCodeSnippet) payload.last_code_snippet = dataUpdate.lastCodeSnippet;
     if (dataUpdate?.lastErrorMessage) payload.last_error_message = dataUpdate.lastErrorMessage;
+    if (event) payload.events_log = [event];
 
     await supabase.from('classroom_sessions').upsert(payload, { onConflict: 'user_id' });
   } catch (err) {
@@ -294,6 +335,12 @@ export async function sendTeacherHintToDb(studentId: string, comment: string) {
   if (!isSupabaseConfigured) return;
 
   try {
+    const { error: rpcErr } = await supabase.rpc('send_teacher_hint', {
+      student_id: studentId,
+      comment_text: comment
+    });
+    if (!rpcErr) return;
+
     await supabase
       .from('classroom_sessions')
       .update({
@@ -304,6 +351,91 @@ export async function sendTeacherHintToDb(studentId: string, comment: string) {
   } catch (err) {
     console.error('Error sending teacher hint:', err);
   }
+}
+
+// 5.1 Отправка / публикация объявления преподавателя
+export async function publishClassroomAnnouncement(groupName: string, message: string, teacherId?: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    // 1. Попытка через RPC publish_announcement
+    const { error: rpcErr } = await supabase.rpc('publish_announcement', {
+      target_group: groupName,
+      announcement: message
+    });
+    if (!rpcErr) return true;
+
+    // 2. Прямая работа с таблицей classroom_announcements
+    await supabase
+      .from('classroom_announcements')
+      .update({ is_active: false })
+      .eq('group_name', groupName)
+      .eq('is_active', true);
+
+    if (message.trim()) {
+      const { error } = await supabase.from('classroom_announcements').insert({
+        group_name: groupName,
+        teacher_id: teacherId,
+        message: message.trim(),
+        is_active: true
+      });
+      if (error) {
+        console.error('Error inserting announcement:', error);
+        return false;
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error('Error in publishClassroomAnnouncement:', err);
+    return false;
+  }
+}
+
+// 5.2 Загрузка последнего активного объявления для группы
+export async function loadActiveAnnouncementFromDb(groupName: string): Promise<string | null> {
+  if (!isSupabaseConfigured || !groupName) return null;
+  try {
+    const { data, error } = await supabase
+      .from('classroom_announcements')
+      .select('message')
+      .eq('group_name', groupName)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Error loading active announcement:', error);
+      return null;
+    }
+    return data?.message || null;
+  } catch (err) {
+    console.warn('Error in loadActiveAnnouncementFromDb:', err);
+    return null;
+  }
+}
+
+// 5.3 Подписка на Realtime объявления
+export function subscribeToAnnouncementsRealtime(
+  groupName: string,
+  onAnnouncementChange: (message: string | null) => void
+) {
+  if (!isSupabaseConfigured) return () => {};
+
+  const channel = supabase
+    .channel(`announcements_${groupName || 'all'}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'classroom_announcements' },
+      async () => {
+        const latest = await loadActiveAnnouncementFromDb(groupName);
+        onAnnouncementChange(latest);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
 
 // 6. Подписка на Realtime аудиторный радар
@@ -486,6 +618,14 @@ export async function submitStudentOnboarding(
 ): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
   try {
+    // 1. Попытка через безопасную RPC функцию submit_onboarding
+    const { error: rpcErr } = await supabase.rpc('submit_onboarding', {
+      new_full_name: fullName.trim(),
+      new_group_name: groupName.trim()
+    });
+    if (!rpcErr) return true;
+
+    // 2. Прямой update с проверкой
     const { error } = await supabase
       .from('profiles')
       .update({
@@ -498,6 +638,55 @@ export async function submitStudentOnboarding(
     return !error;
   } catch (err) {
     console.error('Error submitting student onboarding:', err);
+    return false;
+  }
+}
+
+// 12.1 Сохранение нового практического задания преподавателем в Supabase
+export async function saveCustomTaskToDb(task: Task, lessonId: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const payload = {
+      id: task.id,
+      lessonId,
+      title: task.title,
+      type: task.type,
+      difficulty: task.difficulty,
+      xp: task.xp,
+      instructions: task.instructions,
+      initialCode: task.initialCode || '',
+      quizOptions: task.quizOptions || [],
+      tests: task.tests || [],
+      hints: task.hints || []
+    };
+
+    // 1. Попытка через безопасную RPC функцию create_task
+    const { error: rpcErr } = await supabase.rpc('create_task', { payload });
+    if (!rpcErr) return true;
+
+    // 2. Прямая вставка в tasks
+    const { error: taskErr } = await supabase.from('tasks').upsert({
+      id: task.id,
+      lesson_id: lessonId,
+      title: task.title,
+      type: task.type,
+      difficulty: task.difficulty,
+      xp: task.xp,
+      instructions: task.instructions,
+      initial_code: task.initialCode || '',
+      theory_snippet: task.theorySnippet || '',
+      tests: task.tests || [],
+      quiz_options: task.quizOptions || [],
+      hints: task.hints || []
+    }, { onConflict: 'id' });
+
+    if (taskErr) {
+      console.error('Error inserting task directly into tasks table:', taskErr);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Error in saveCustomTaskToDb:', err);
     return false;
   }
 }

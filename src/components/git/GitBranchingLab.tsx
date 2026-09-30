@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 export const GitBranchingLab: React.FC = () => {
-  const { completeTask } = useApp();
+  const { completeTask, completedTaskIds } = useApp();
 
   const [currentLevelIndex, setCurrentLevelIndex] = useState<number>(0);
   const [isSandbox, setIsSandbox] = useState<boolean>(false);
@@ -38,7 +38,19 @@ export const GitBranchingLab: React.FC = () => {
   const [showLevelSelect, setShowLevelSelect] = useState<boolean>(false);
   const [selectedSequenceFilter, setSelectedSequenceFilter] = useState<string>('all');
   const [levelCompleted, setLevelCompleted] = useState<boolean>(false);
-  const [completedLevels, setCompletedLevels] = useState<string[]>([]);
+  const [completedLevels, setCompletedLevels] = useState<string[]>(() => {
+    return completedTaskIds.filter(id => GIT_LEVELS.some(lvl => lvl.id === id));
+  });
+
+  // Синхронизация прогресса Git с глобальным списком решенных задач
+  useEffect(() => {
+    const gitCompleted = completedTaskIds.filter(id => GIT_LEVELS.some(lvl => lvl.id === id));
+    setCompletedLevels(prev => {
+      const merged = Array.from(new Set([...prev, ...gitCompleted]));
+      if (merged.length !== prev.length) return merged;
+      return prev;
+    });
+  }, [completedTaskIds]);
 
   const currentLevel: GitLevel = GIT_LEVELS[currentLevelIndex] || GIT_LEVELS[0];
 
